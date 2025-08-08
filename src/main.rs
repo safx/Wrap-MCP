@@ -1,7 +1,7 @@
 use anyhow::Result;
-use wrap_mcp::{server, WrapServer};
 use std::env;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
+use wrap_mcp::{WrapServer, server};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -13,7 +13,17 @@ async fn main() -> Result<()> {
 
     let service_factory = || {
         tracing::info!("Creating service instance");
-        Ok(WrapServer::new())
+        let server = WrapServer::new();
+
+        // Initialize wrappee in the background
+        let server_clone = server.clone();
+        tokio::spawn(async move {
+            if let Err(e) = server_clone.initialize_wrappee().await {
+                tracing::error!("Failed to initialize wrappee: {}", e);
+            }
+        });
+
+        Ok(server)
     };
 
     match transport.as_str() {
