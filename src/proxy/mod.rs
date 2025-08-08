@@ -71,9 +71,9 @@ impl ProxyHandler {
                 },
                 "format": {
                     "type": "string",
-                    "enum": ["text", "json"],
-                    "description": "Output format (default: text)",
-                    "default": "text"
+                    "enum": ["ai", "text", "json"],
+                    "description": "Output format (default: ai)",
+                    "default": "ai"
                 }
             }
         })
