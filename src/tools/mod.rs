@@ -36,6 +36,21 @@ impl WrapServer {
 
         // Find the "--" separator
         let separator_pos = args.iter().position(|arg| arg == "--");
+        
+        // Check for --ansi option before "--"
+        let preserve_ansi = separator_pos
+            .map(|pos| args[1..pos].contains(&"--ansi".to_string()))
+            .unwrap_or(false);
+        
+        if preserve_ansi {
+            tracing::info!("ANSI escape sequences will be preserved (--ansi option)");
+            // Store the flag in log storage (false = don't remove ANSI)
+            self.proxy_handler.log_storage.set_ansi_removal(false).await;
+        } else {
+            tracing::info!("ANSI escape sequence removal enabled (default)");
+            // Store the flag in log storage (true = remove ANSI)
+            self.proxy_handler.log_storage.set_ansi_removal(true).await;
+        }
 
         let (command, wrappee_args) = match separator_pos {
             Some(pos) if pos + 1 < args.len() => {
@@ -66,7 +81,8 @@ impl WrapServer {
             wrappee_args
         );
 
-        let mut wrappee_client = WrappeeClient::spawn(&command, &wrappee_args)?;
+        // Pass !preserve_ansi to disable colors (we want to disable colors by default)
+        let mut wrappee_client = WrappeeClient::spawn(&command, &wrappee_args, !preserve_ansi)?;
 
         // Initialize the wrappee
         wrappee_client.initialize().await?;

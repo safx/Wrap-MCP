@@ -34,6 +34,14 @@ cargo build --release
 wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
 ```
 
+#### Options
+
+- `--ansi`: Preserve ANSI escape sequences in stderr logs
+  - By default, Wrap-MCP removes ANSI escape sequences using a hybrid approach:
+    - Sets `NO_COLOR=1`, `CLICOLOR=0`, and `RUST_LOG_STYLE=never` environment variables for the wrappee
+    - Additionally removes any remaining ANSI escape sequences from stderr output
+  - Use this option to preserve the original formatting
+
 ### Environment Variables
 
 - `WRAP_MCP_TRANSPORT`: Transport method (`stdio` or `http`, default: `stdio`)
@@ -43,7 +51,7 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
 ### Examples
 
 ```bash
-# Wrap and launch another MCP server
+# Wrap and launch another MCP server (ANSI removed by default)
 WRAP_MCP_LOGSIZE=500 \
 RUST_LOG=info \
 cargo run -- my-mcp-server --option1 value1
@@ -51,8 +59,14 @@ cargo run -- my-mcp-server --option1 value1
 # Launch with HTTP transport
 WRAP_MCP_TRANSPORT=http cargo run -- my-mcp-server
 
-# After building, run directly
+# Launch while preserving ANSI escape sequences
+cargo run -- --ansi -- my-mcp-server --option1 value1
+
+# After building, run directly (ANSI removed by default)
 ./target/release/wrap-mcp -- my-mcp-server --port 8080 --config config.json
+
+# Preserve ANSI escape sequences
+./target/release/wrap-mcp --ansi -- my-mcp-server --port 8080
 ```
 
 ## Available Tools

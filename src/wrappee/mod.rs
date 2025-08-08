@@ -15,14 +15,24 @@ pub struct WrappeeClient {
 }
 
 impl WrappeeClient {
-    pub fn spawn(command: &str, args: &[String]) -> Result<Self> {
+    pub fn spawn(command: &str, args: &[String], disable_colors: bool) -> Result<Self> {
         tracing::info!("Spawning wrappee process: {} {:?}", command, args);
 
-        let mut child = Command::new(command)
-            .args(args)
+        let mut cmd = Command::new(command);
+        cmd.args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
+            .stderr(Stdio::piped());
+        
+        // Set environment variables to disable colors if requested
+        if disable_colors {
+            cmd.env("NO_COLOR", "1")
+                .env("CLICOLOR", "0")
+                .env("RUST_LOG_STYLE", "never");
+            tracing::debug!("Setting NO_COLOR=1, CLICOLOR=0, RUST_LOG_STYLE=never for wrappee");
+        }
+        
+        let mut child = cmd
             .spawn()
             .context("Failed to spawn wrappee process")?;
 

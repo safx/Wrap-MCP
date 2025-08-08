@@ -28,6 +28,7 @@ pub struct LogStorage {
     entries: Arc<RwLock<Vec<LogEntry>>>,
     next_id: Arc<RwLock<usize>>,
     max_entries: usize,
+    ansi_removal_enabled: Arc<RwLock<bool>>,
 }
 
 impl LogStorage {
@@ -43,6 +44,7 @@ impl LogStorage {
             entries: Arc::new(RwLock::new(Vec::new())),
             next_id: Arc::new(RwLock::new(1)),
             max_entries,
+            ansi_removal_enabled: Arc::new(RwLock::new(true)), // Default to removing ANSI
         }
     }
 
@@ -130,6 +132,13 @@ impl LogStorage {
         let mut next_id = self.next_id.write().await;
         let id = *next_id;
         *next_id += 1;
+        
+        // Remove ANSI escape sequences if enabled
+        let cleaned_message = if *self.ansi_removal_enabled.read().await {
+            Self::remove_ansi_sequences(&message)
+        } else {
+            message.clone()
+        };
 
         let entry = LogEntry {
             id,
@@ -137,7 +146,7 @@ impl LogStorage {
             entry_type: LogEntryType::Stderr,
             tool_name: None,
             content: serde_json::json!({
-                "message": message
+                "message": cleaned_message
             }),
         };
 
@@ -207,6 +216,19 @@ impl LogStorage {
     pub async fn get_log_count(&self) -> usize {
         let entries = self.entries.read().await;
         entries.len()
+    }
+    
+    pub async fn set_ansi_removal(&self, enabled: bool) {
+        let mut ansi_removal = self.ansi_removal_enabled.write().await;
+        *ansi_removal = enabled;
+    }
+    
+    /// Remove ANSI escape sequences from a string
+    fn remove_ansi_sequences(text: &str) -> String {
+        // Pattern to match ANSI escape sequences
+        // Matches: ESC[...m, ESC[...K, ESC[...H, ESC[...J, etc.
+        let ansi_regex = regex::Regex::new(r"\x1b\[[0-9;]*[mGKHJF]").unwrap();
+        ansi_regex.replace_all(text, "").to_string()
     }
 }
 
