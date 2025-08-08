@@ -11,6 +11,9 @@ use tokio::sync::RwLock;
 pub struct WrapServer {
     proxy_handler: Arc<ProxyHandler>,
     wrappee: Arc<RwLock<Option<WrappeeClient>>>,
+    wrappee_command: Arc<RwLock<Option<String>>>,
+    wrappee_args: Arc<RwLock<Option<Vec<String>>>>,
+    disable_colors: Arc<RwLock<bool>>,
 }
 
 impl Default for WrapServer {
@@ -27,6 +30,9 @@ impl WrapServer {
         Self {
             proxy_handler,
             wrappee: Arc::new(RwLock::new(None)),
+            wrappee_command: Arc::new(RwLock::new(None)),
+            wrappee_args: Arc::new(RwLock::new(None)),
+            disable_colors: Arc::new(RwLock::new(false)),
         }
     }
 
@@ -81,6 +87,11 @@ impl WrapServer {
             wrappee_args
         );
 
+        // Store command and args for potential restart
+        *self.wrappee_command.write().await = Some(command.clone());
+        *self.wrappee_args.write().await = Some(wrappee_args.clone());
+        *self.disable_colors.write().await = !preserve_ansi;
+        
         // Pass !preserve_ansi to disable colors (we want to disable colors by default)
         let mut wrappee_client = WrappeeClient::spawn(&command, &wrappee_args, !preserve_ansi)?;
 
@@ -114,6 +125,92 @@ impl WrapServer {
         Ok(())
     }
 
+    pub async fn restart_wrapped_server(&self) -> Result<CallToolResult, McpError> {
+        tracing::info!("Restarting wrapped server");
+        
+        // Get stored command and args
+        let command = self.wrappee_command.read().await.clone();
+        let args = self.wrappee_args.read().await.clone();
+        let disable_colors = *self.disable_colors.read().await;
+        
+        let (command, args) = match (command, args) {
+            (Some(cmd), Some(args)) => (cmd, args),
+            _ => {
+                return Err(McpError {
+                    code: ErrorCode::INTERNAL_ERROR,
+                    message: "No wrapped server to restart".into(),
+                    data: None,
+                });
+            }
+        };
+        
+        // Shutdown existing wrappee
+        {
+            let mut wrappee_guard = self.wrappee.write().await;
+            if let Some(client) = wrappee_guard.take() {
+                tracing::info!("Shutting down existing wrapped server");
+                if let Err(e) = client.shutdown().await {
+                    tracing::warn!("Error during shutdown: {}", e);
+                }
+            }
+        }
+        
+        // Wait a bit for clean shutdown
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        
+        // Start new wrappee
+        tracing::info!("Starting new wrapped server: {} {:?}", command, args);
+        let mut wrappee_client = WrappeeClient::spawn(&command, &args, disable_colors)
+            .map_err(|e| McpError {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: format!("Failed to spawn wrapped server: {}", e).into(),
+                data: None,
+            })?;
+        
+        // Initialize the wrappee
+        wrappee_client.initialize().await
+            .map_err(|e| McpError {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: format!("Failed to initialize wrapped server: {}", e).into(),
+                data: None,
+            })?;
+        
+        // Clear and rediscover tools from wrappee
+        self.proxy_handler.clear_tools().await;
+        self.proxy_handler
+            .discover_tools(&mut wrappee_client)
+            .await
+            .map_err(|e| McpError {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: format!("Failed to discover tools: {}", e).into(),
+                data: None,
+            })?;
+        
+        // Store the new wrappee client
+        *self.wrappee.write().await = Some(wrappee_client);
+        
+        // Restart stderr monitoring
+        let wrappee_clone = self.wrappee.clone();
+        let log_storage = self.proxy_handler.log_storage.clone();
+        tokio::spawn(async move {
+            loop {
+                let mut wrappee_guard = wrappee_clone.write().await;
+                if let Some(wrappee) = wrappee_guard.as_mut() {
+                    if let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await {
+                        log_storage.add_stderr(stderr_msg).await;
+                    }
+                }
+                drop(wrappee_guard);
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        });
+        
+        tracing::info!("Wrapped server restarted successfully");
+        Ok(CallToolResult::success(vec![Content::text(
+            "✅ Wrapped server restarted successfully"
+        )]))
+    }
+
     // Dynamic tool handler - not directly exposed through tool_router
     pub async fn call_tool_dynamic(
         &self,
@@ -139,6 +236,10 @@ impl WrapServer {
                     data: None,
                 })?;
             return show_log::clear_log(req, &self.proxy_handler.log_storage).await;
+        }
+        
+        if name == "restart_wrapped_server" {
+            return self.restart_wrapped_server().await;
         }
 
         // Proxy to wrappee

@@ -47,6 +47,12 @@ impl ProxyHandler {
         Ok(())
     }
 
+    pub async fn clear_tools(&self) {
+        let mut wrappee_tools = self.wrappee_tools.write().await;
+        wrappee_tools.clear();
+        tracing::info!("Cleared all discovered tools");
+    }
+
     pub async fn get_all_tools(&self) -> Vec<Tool> {
         let wrappee_tools = self.wrappee_tools.read().await;
         let mut all_tools = wrappee_tools.clone();
@@ -102,6 +108,23 @@ impl ProxyHandler {
             name: "clear_log".into(),
             description: Some("Clear all recorded logs".into()),
             input_schema: Arc::new(clear_log_schema),
+            output_schema: None,
+            annotations: None,
+        });
+
+        // Add restart_wrapped_server tool
+        let restart_schema: Map<String, Value> = serde_json::json!({
+            "type": "object",
+            "properties": {}
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+
+        all_tools.push(Tool {
+            name: "restart_wrapped_server".into(),
+            description: Some("Restart the wrapped MCP server while preserving logs".into()),
+            input_schema: Arc::new(restart_schema),
             output_schema: None,
             annotations: None,
         });

@@ -91,6 +91,16 @@ Parameters:
 #### `clear_log`
 Clears all recorded logs.
 
+#### `restart_wrapped_server`
+Restarts the wrapped MCP server while preserving all recorded logs.
+
+This is useful when:
+- The wrapped server becomes unresponsive
+- You want to reload the wrapped server after updating its code
+- You need to reset the wrapped server's state
+
+Note: During restart, client requests will fail temporarily.
+
 ## Log Management
 
 - Logs are stored in memory
