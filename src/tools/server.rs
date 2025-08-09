@@ -213,7 +213,7 @@ impl WrapServer {
                                 };
 
                                 // Perform restart
-                                if let Err(e) = server.restart_wrapped_server().await {
+                                if let Err(e) = server.restart_wrapped_server(None).await {
                                     tracing::error!("Failed to restart wrapped server: {:?}", e);
                                 } else {
                                     // Get new PID after restart
@@ -244,7 +244,10 @@ impl WrapServer {
         Ok(())
     }
 
-    pub async fn restart_wrapped_server(&self) -> Result<CallToolResult, McpError> {
+    pub async fn restart_wrapped_server(
+        &self,
+        context: Option<RequestContext<RoleServer>>,
+    ) -> Result<CallToolResult, McpError> {
         tracing::info!("Restarting wrapped server");
 
         // Get stored command and args
@@ -307,6 +310,15 @@ impl WrapServer {
         // Store the new wrappee client
         *self.wrappee.write().await = Some(wrappee_client);
 
+        // Send tool list changed notification if context is available
+        if let Some(ctx) = context {
+            let peer = ctx.peer;
+            tracing::info!("Sending tools/list_changed notification to client");
+            if let Err(e) = peer.notify_tool_list_changed().await {
+                tracing::warn!("Failed to send tool list changed notification: {}", e);
+            }
+        }
+
         // Restart stderr monitoring
         let wrappee_clone = self.wrappee.clone();
         let log_storage = self.proxy_handler.log_storage.clone();
@@ -354,10 +366,6 @@ impl WrapServer {
             return clear_log(req, &self.proxy_handler.log_storage).await;
         }
 
-        if name == "restart_wrapped_server" {
-            return self.restart_wrapped_server().await;
-        }
-
         // Proxy to wrappee
         let mut wrappee_guard = self.wrappee.write().await;
         if let Some(wrappee) = wrappee_guard.as_mut() {
@@ -378,7 +386,10 @@ impl ServerHandler for WrapServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
             protocol_version: ProtocolVersion::V_2024_11_05,
-            capabilities: ServerCapabilities::builder().enable_tools().build(),
+            capabilities: ServerCapabilities::builder()
+                .enable_tools()
+                .enable_tool_list_changed()
+                .build(),
             server_info: Implementation {
                 name: "Wrap-MCP".to_string(),
                 version: env!("CARGO_PKG_VERSION").to_string(),
@@ -405,12 +416,18 @@ impl ServerHandler for WrapServer {
     async fn call_tool(
         &self,
         request: CallToolRequestParam,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
         let arguments = request
             .arguments
             .map(serde_json::Value::Object)
             .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
-        self.call_tool_dynamic(&request.name, arguments).await
+
+        // Pass context for restart_wrapped_server to send notifications
+        if request.name == "restart_wrapped_server" {
+            self.restart_wrapped_server(Some(context)).await
+        } else {
+            self.call_tool_dynamic(&request.name, arguments).await
+        }
     }
 }
