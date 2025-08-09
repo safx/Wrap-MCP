@@ -22,13 +22,6 @@ MCP Client ◄────────► Wrap-MCP ◄────────�
                    (In-Memory VecDeque)
 ```
 
-### Internal Structure
-
-- **Modular design**: Separated into `logging`, `proxy`, `tools`, and `wrappee` modules
-- **Type-safe logging**: ADT-based `LogEntryContent` enum for compile-time safety
-- **Efficient storage**: VecDeque-based ring buffer for O(1) log trimming
-- **Async-safe**: Thread-safe operations with RwLock protection
-
 ## Installation
 
 ```bash
@@ -131,30 +124,6 @@ This is useful when:
 
 Note: During restart, client requests will fail temporarily.
 
-## Log Management
-
-### Storage Implementation
-
-- **In-memory storage**: Uses `VecDeque` for efficient FIFO operations
-- **Automatic trimming**: O(1) removal of old logs when exceeding `WRAP_MCP_LOGSIZE`
-- **Type-safe entries**: Each log entry is strongly typed with ADT enum
-- **Thread-safe**: All operations protected by async RwLock
-- **Filtering**: Supports filtering by tool name, entry type, and timestamp ranges
-
-### Log Entry Types
-
-- **Request**: Tool invocation with arguments
-- **Response**: Successful tool execution results
-- **Error**: Failed tool executions with error messages
-- **Stderr**: Captured stderr output from wrapped server
-
-### Performance
-
-- Log insertion: O(1)
-- Old log removal: O(1) with VecDeque
-- Filtering: O(n) where n is the number of logs
-- Memory usage: Bounded by `WRAP_MCP_LOGSIZE`
-
 ## Development
 
 ### Build
@@ -166,6 +135,7 @@ cargo build
 ```bash
 # Run all tests
 cargo test
+```
 
 ### Format
 ```bash
