@@ -53,6 +53,9 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
 
 - `WRAP_MCP_TRANSPORT`: Transport method (`stdio` or `http`, default: `stdio`)
 - `WRAP_MCP_LOGSIZE`: Maximum number of log entries to retain (default: 1000)
+- `WRAP_MCP_PROTOCOL_VERSION`: Protocol version to use when initializing the wrapped server (default: `2025.06.18`)
+  - This allows compatibility with wrapped servers that require specific protocol versions
+  - Example: `WRAP_MCP_PROTOCOL_VERSION="2024.12.01"`
 - `RUST_LOG`: Log level configuration (e.g., `info`, `debug`, `trace`)
 
 ### Examples
@@ -80,6 +83,9 @@ cargo run -- --ansi -- my-mcp-server --option1 value1
 
 # Combine options: watch + preserve ANSI
 ./target/release/wrap-mcp -w --ansi -- /path/to/my-mcp-server
+
+# Use a specific protocol version for the wrapped server
+WRAP_MCP_PROTOCOL_VERSION="2024.12.01" ./target/release/wrap-mcp -- my-mcp-server
 ```
 
 ## Available Tools
