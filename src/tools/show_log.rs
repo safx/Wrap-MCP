@@ -1,4 +1,4 @@
-use crate::logging::{LogEntry, LogEntryContent, LogFilter, LogStorage};
+use crate::logging::{LogEntry, LogEntryContent, LogEntryType, LogFilter, LogStorage};
 use anyhow::Result;
 use rmcp::{ErrorData as McpError, model::*};
 use schemars::JsonSchema;
@@ -14,6 +14,9 @@ pub struct ShowLogRequest {
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub entry_type: Option<String>,
+
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyword: Option<String>,
 
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
@@ -32,7 +35,7 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
         for log in &logs {
             match &log.content {
                 LogEntryContent::Request { tool_name, content } => {
-                    let args = &content["arguments"];
+                    let args = content;
                     let args_str = if let Some(obj) = args.as_object() {
                         obj.iter()
                             .map(|(k, v)| {
@@ -124,25 +127,17 @@ fn format_text_output(logs: Vec<LogEntry>) -> Content {
     let mut output = String::new();
 
     for log in logs {
+        let content = &log.content;
+        let entry_type: LogEntryType = content.into();
         output.push_str(&format!(
             "[#{}] {} | {}\n",
             log.id,
             log.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-            match &log.content {
-                LogEntryContent::Request { .. } => "📤 REQUEST",
-                LogEntryContent::Response { .. } => "📥 RESPONSE",
-                LogEntryContent::Error { .. } => "❌ ERROR",
-                LogEntryContent::Stderr { .. } => "⚠️ STDERR",
-            }
+            entry_type,
         ));
 
-        match &log.content {
-            LogEntryContent::Request { tool_name, .. }
-            | LogEntryContent::Response { tool_name, .. }
-            | LogEntryContent::Error { tool_name, .. } => {
-                output.push_str(&format!("Tool: {tool_name}\n"));
-            }
-            LogEntryContent::Stderr { .. } => {}
+        if let Some(tool_name) = content.tool_name() {
+            output.push_str(&format!("Tool: {tool_name}\n"));
         }
 
         output.push_str(&format!(
@@ -173,6 +168,7 @@ pub async fn show_log(
         entry_type: req.entry_type,
         after: None,
         before: None,
+        keyword: req.keyword,
     };
 
     let logs = log_storage.get_logs(Some(req.limit), Some(filter)).await;

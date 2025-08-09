@@ -1,3 +1,5 @@
+use core::fmt;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -27,6 +29,15 @@ pub enum LogEntryContent {
 }
 
 impl LogEntryContent {
+    pub fn tool_name(&self) -> Option<&str> {
+        match self {
+            LogEntryContent::Request { tool_name, .. } => Some(tool_name),
+            LogEntryContent::Response { tool_name, .. } => Some(tool_name),
+            LogEntryContent::Error { tool_name, .. } => Some(tool_name),
+            LogEntryContent::Stderr { .. } => None,
+        }
+    }
+
     pub fn match_tool_name(&self, name: &str) -> bool {
         match self {
             LogEntryContent::Request { tool_name, .. } => tool_name == name,
@@ -114,6 +125,21 @@ impl LogEntry {
         {
             return false;
         }
+
+        // Keyword regex filtering
+        if let Some(ref keyword) = filter.keyword {
+            // Serialize content to string for searching
+            let content_str = serde_json::to_string(&self.content).unwrap_or_default();
+            if let Ok(re) = regex::Regex::new(keyword) {
+                if !re.is_match(&content_str) {
+                    return false;
+                }
+            } else if !content_str.contains(keyword) {
+                // If regex is invalid, treat as literal string search
+                return false;
+            }
+        }
+
         true
     }
 }
@@ -128,8 +154,19 @@ pub enum LogEntryType {
     Stderr,
 }
 
-impl From<LogEntryContent> for LogEntryType {
-    fn from(content: LogEntryContent) -> Self {
+impl fmt::Display for LogEntryType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            LogEntryType::Request => write!(f, "request"),
+            LogEntryType::Response => write!(f, "response"),
+            LogEntryType::Error => write!(f, "error"),
+            LogEntryType::Stderr => write!(f, "stderr"),
+        }
+    }
+}
+
+impl From<&LogEntryContent> for LogEntryType {
+    fn from(content: &LogEntryContent) -> Self {
         match content {
             LogEntryContent::Request { .. } => LogEntryType::Request,
             LogEntryContent::Response { .. } => LogEntryType::Response,
@@ -173,6 +210,7 @@ mod tests {
             entry_type: None,
             after: None,
             before: None,
+            keyword: None,
         };
         assert!(entry.filter(&filter));
 
@@ -182,6 +220,7 @@ mod tests {
             entry_type: None,
             after: None,
             before: None,
+            keyword: None,
         };
         assert!(!entry.filter(&filter));
 
@@ -198,6 +237,7 @@ mod tests {
             entry_type: None,
             after: None,
             before: None,
+            keyword: None,
         };
         assert!(!stderr_entry.filter(&filter));
     }
@@ -219,6 +259,7 @@ mod tests {
             entry_type: Some("request".to_string()),
             after: None,
             before: None,
+            keyword: None,
         };
         assert!(request_entry.filter(&filter));
 
@@ -228,6 +269,7 @@ mod tests {
             entry_type: Some("response".to_string()),
             after: None,
             before: None,
+            keyword: None,
         };
         assert!(!request_entry.filter(&filter));
     }
@@ -250,6 +292,7 @@ mod tests {
             entry_type: None,
             after: Some(Utc.with_ymd_and_hms(2024, 1, 15, 11, 0, 0).unwrap()),
             before: None,
+            keyword: None,
         };
         assert!(entry.filter(&filter));
 
@@ -259,6 +302,7 @@ mod tests {
             entry_type: None,
             after: Some(Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap()),
             before: None,
+            keyword: None,
         };
         assert!(!entry.filter(&filter));
 
@@ -268,6 +312,7 @@ mod tests {
             entry_type: None,
             after: None,
             before: Some(Utc.with_ymd_and_hms(2024, 1, 15, 13, 0, 0).unwrap()),
+            keyword: None,
         };
         assert!(entry.filter(&filter));
 
@@ -277,6 +322,7 @@ mod tests {
             entry_type: None,
             after: None,
             before: Some(Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap()),
+            keyword: None,
         };
         assert!(!entry.filter(&filter));
     }
@@ -299,6 +345,7 @@ mod tests {
             entry_type: Some("response".to_string()),
             after: Some(Utc.with_ymd_and_hms(2024, 1, 15, 11, 0, 0).unwrap()),
             before: Some(Utc.with_ymd_and_hms(2024, 1, 15, 13, 0, 0).unwrap()),
+            keyword: None,
         };
         assert!(entry.filter(&filter));
 
@@ -308,6 +355,7 @@ mod tests {
             entry_type: Some("response".to_string()),
             after: Some(Utc.with_ymd_and_hms(2024, 1, 15, 11, 0, 0).unwrap()),
             before: Some(Utc.with_ymd_and_hms(2024, 1, 15, 13, 0, 0).unwrap()),
+            keyword: None,
         };
         assert!(!entry.filter(&filter));
     }
@@ -330,6 +378,86 @@ mod tests {
             entry_type: None,
             after: None,
             before: None,
+            keyword: None,
+        };
+        assert!(entry.filter(&filter));
+    }
+
+    #[test]
+    fn test_filter_by_keyword_regex() {
+        let entry = create_test_entry(
+            1,
+            Utc::now(),
+            LogEntryContent::Request {
+                tool_name: "search_tool".to_string(),
+                content: serde_json::json!({
+                    "query": "find important document",
+                    "options": {"case_sensitive": false}
+                }),
+            },
+        );
+
+        // Should match with regex pattern
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: None,
+            before: None,
+            keyword: Some(r"important\s+doc".to_string()),
+        };
+        assert!(entry.filter(&filter));
+
+        // Should not match when pattern doesn't exist
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: None,
+            before: None,
+            keyword: Some(r"missing\s+pattern".to_string()),
+        };
+        assert!(!entry.filter(&filter));
+
+        // Test case-insensitive regex
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: None,
+            before: None,
+            keyword: Some(r"(?i)IMPORTANT".to_string()),
+        };
+        assert!(entry.filter(&filter));
+    }
+
+    #[test]
+    fn test_filter_by_keyword_literal() {
+        let entry = create_test_entry(
+            1,
+            Utc::now(),
+            LogEntryContent::Error {
+                tool_name: "database".to_string(),
+                request_id: 1,
+                error: "Connection timeout after 30 seconds".to_string(),
+            },
+        );
+
+        // Invalid regex should fall back to literal string search
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: None,
+            before: None,
+            keyword: Some("timeout[".to_string()), // Invalid regex (unclosed bracket)
+        };
+        // Should not match because "timeout[" is not in the content literally
+        assert!(!entry.filter(&filter));
+
+        // Valid literal search
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: None,
+            before: None,
+            keyword: Some("timeout".to_string()),
         };
         assert!(entry.filter(&filter));
     }

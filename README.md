@@ -112,6 +112,7 @@ Parameters:
 - `limit`: Maximum number of entries to display (default: 20)
 - `tool_name`: Filter by tool name
 - `entry_type`: Filter by entry type (`request`, `response`, `error`, `stderr`)
+- `keyword`: Regular expression pattern to search in log content (supports regex or literal string)
 - `format`: Output format (default: `ai`)
   - `ai`: Concise format optimized for AI consumption
   - `text`: Detailed human-readable format with timestamps and formatting

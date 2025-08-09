@@ -36,6 +36,7 @@ mod tests {
             entry_type: None,
             after: None,
             before: None,
+            keyword: None,
         };
 
         let filtered_logs = storage.get_logs(None, Some(filter)).await;

@@ -75,6 +75,10 @@ impl ProxyHandler {
                     "enum": ["request", "response", "error", "stderr"],
                     "description": "Filter logs by entry type"
                 },
+                "keyword": {
+                    "type": "string",
+                    "description": "Regular expression pattern to search in log content (fallback to literal search if invalid regex)"
+                },
                 "format": {
                     "type": "string",
                     "enum": ["ai", "text", "json"],

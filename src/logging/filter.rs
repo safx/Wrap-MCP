@@ -7,4 +7,5 @@ pub struct LogFilter {
     pub entry_type: Option<String>,
     pub after: Option<DateTime<Utc>>,
     pub before: Option<DateTime<Utc>>,
+    pub keyword: Option<String>, // Regular expression pattern for content search
 }
