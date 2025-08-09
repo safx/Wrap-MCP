@@ -126,9 +126,10 @@ impl WrapServer {
             loop {
                 let mut wrappee_guard = wrappee_clone.write().await;
                 if let Some(wrappee) = wrappee_guard.as_mut()
-                    && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await {
-                        log_storage.add_stderr(stderr_msg).await;
-                    }
+                    && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await
+                {
+                    log_storage.add_stderr(stderr_msg).await;
+                }
                 drop(wrappee_guard);
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
@@ -313,9 +314,10 @@ impl WrapServer {
             loop {
                 let mut wrappee_guard = wrappee_clone.write().await;
                 if let Some(wrappee) = wrappee_guard.as_mut()
-                    && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await {
-                        log_storage.add_stderr(stderr_msg).await;
-                    }
+                    && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await
+                {
+                    log_storage.add_stderr(stderr_msg).await;
+                }
                 drop(wrappee_guard);
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }

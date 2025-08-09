@@ -64,36 +64,31 @@ impl LogStorage {
 
     pub async fn add_response(&self, request_id: usize, tool_name: String, response: Value) {
         let id = self.get_next_id().await;
+        tracing::info!("Logged response #{id} for request #{request_id}");
         let entry = LogEntry::new_response(id, tool_name, request_id, response);
         self.add_entry(entry).await;
-        tracing::info!("Logged response #{} for request #{}", id, request_id);
     }
 
     pub async fn add_error(&self, request_id: usize, tool_name: String, error_message: String) {
         let id = self.get_next_id().await;
-        let entry = LogEntry::new_error(id, tool_name, request_id, error_message.clone());
+        tracing::error!("Logged error #{id} for request #{request_id}: {error_message}");
+        let entry = LogEntry::new_error(id, tool_name, request_id, error_message);
         self.add_entry(entry).await;
-        tracing::error!(
-            "Logged error #{} for request #{}: {}",
-            id,
-            request_id,
-            error_message
-        );
     }
 
     pub async fn add_stderr(&self, message: String) {
         let id = self.get_next_id().await;
+        tracing::warn!("Logged stderr #{id}: {message}");
 
         // Remove ANSI escape sequences if enabled
         let cleaned_message = if *self.ansi_removal_enabled.read().await {
             Self::remove_ansi_sequences(&message)
         } else {
-            message.clone()
+            message
         };
 
         let entry = LogEntry::new_stderr(id, cleaned_message);
         self.add_entry(entry).await;
-        tracing::warn!("Logged stderr #{}: {}", id, message);
     }
 
     pub async fn get_logs(&self, limit: Option<usize>, filter: Option<LogFilter>) -> Vec<LogEntry> {

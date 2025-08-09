@@ -29,12 +29,13 @@ impl ProxyHandler {
         if let Some(result) = response.get("result")
             && let Some(tools_value) = result.get("tools")
         {
-            let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
+            let tools: Vec<Tool> = serde_json::from_value(tools_value.to_owned())?;
 
             let mut wrappee_tools = self.wrappee_tools.write().await;
-            *wrappee_tools = tools.clone();
 
-            tracing::info!("Discovered {} tools from wrappee", tools.len());
+            let len = wrappee_tools.len();
+            tracing::info!("Discovered {len} tools from wrappee");
+
             for tool in &tools {
                 tracing::debug!(
                     "  - {}: {}",
@@ -42,6 +43,7 @@ impl ProxyHandler {
                     tool.description.as_deref().unwrap_or("")
                 );
             }
+            *wrappee_tools = tools;
         }
 
         Ok(())
@@ -161,7 +163,7 @@ impl ProxyHandler {
                 // Extract the result from the response
                 if let Some(result) = response.get("result") {
                     if let Ok(tool_result) =
-                        serde_json::from_value::<CallToolResult>(result.clone())
+                        serde_json::from_value::<CallToolResult>(result.to_owned())
                     {
                         Ok(tool_result)
                     } else {
