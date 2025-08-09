@@ -33,6 +33,19 @@ impl LogStorage {
         }
     }
 
+    async fn get_next_id(&self) -> usize {
+        let mut next_id = self.next_id.write().await;
+        let id = *next_id;
+        *next_id += 1;
+        id
+    }
+
+    async fn add_entry(&self, entry: LogEntry) {
+        let mut entries = self.entries.write().await;
+        entries.push_back(entry);
+        self.trim_entries(&mut entries).await;
+    }
+
     async fn trim_entries(&self, entries: &mut VecDeque<LogEntry>) {
         if entries.len() > self.max_entries {
             let remove_count = entries.len() - self.max_entries;
@@ -42,45 +55,24 @@ impl LogStorage {
     }
 
     pub async fn add_request(&self, tool_name: String, arguments: Value) -> usize {
-        let mut next_id = self.next_id.write().await;
-        let id = *next_id;
-        *next_id += 1;
-
+        let id = self.get_next_id().await;
         let entry = LogEntry::new_request(id, tool_name, arguments);
-
-        let mut entries = self.entries.write().await;
-        entries.push_back(entry);
-        self.trim_entries(&mut entries).await;
-
+        self.add_entry(entry).await;
         tracing::info!("Logged request #{}", id);
         id
     }
 
     pub async fn add_response(&self, request_id: usize, tool_name: String, response: Value) {
-        let mut next_id = self.next_id.write().await;
-        let id = *next_id;
-        *next_id += 1;
-
+        let id = self.get_next_id().await;
         let entry = LogEntry::new_response(id, tool_name, request_id, response);
-
-        let mut entries = self.entries.write().await;
-        entries.push_back(entry);
-        self.trim_entries(&mut entries).await;
-
+        self.add_entry(entry).await;
         tracing::info!("Logged response #{} for request #{}", id, request_id);
     }
 
     pub async fn add_error(&self, request_id: usize, tool_name: String, error_message: String) {
-        let mut next_id = self.next_id.write().await;
-        let id = *next_id;
-        *next_id += 1;
-
+        let id = self.get_next_id().await;
         let entry = LogEntry::new_error(id, tool_name, request_id, error_message.clone());
-
-        let mut entries = self.entries.write().await;
-        entries.push_back(entry);
-        self.trim_entries(&mut entries).await;
-
+        self.add_entry(entry).await;
         tracing::error!(
             "Logged error #{} for request #{}: {}",
             id,
@@ -90,9 +82,7 @@ impl LogStorage {
     }
 
     pub async fn add_stderr(&self, message: String) {
-        let mut next_id = self.next_id.write().await;
-        let id = *next_id;
-        *next_id += 1;
+        let id = self.get_next_id().await;
 
         // Remove ANSI escape sequences if enabled
         let cleaned_message = if *self.ansi_removal_enabled.read().await {
@@ -102,11 +92,7 @@ impl LogStorage {
         };
 
         let entry = LogEntry::new_stderr(id, cleaned_message);
-
-        let mut entries = self.entries.write().await;
-        entries.push_back(entry);
-        self.trim_entries(&mut entries).await;
-
+        self.add_entry(entry).await;
         tracing::warn!("Logged stderr #{}: {}", id, message);
     }
 
