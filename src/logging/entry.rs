@@ -138,3 +138,199 @@ impl From<LogEntryContent> for LogEntryType {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn create_test_entry(
+        id: usize,
+        timestamp: DateTime<Utc>,
+        content: LogEntryContent,
+    ) -> LogEntry {
+        LogEntry {
+            id,
+            timestamp,
+            content,
+        }
+    }
+
+    #[test]
+    fn test_filter_by_tool_name() {
+        let entry = create_test_entry(
+            1,
+            Utc::now(),
+            LogEntryContent::Request {
+                tool_name: "test_tool".to_string(),
+                content: serde_json::json!({}),
+            },
+        );
+
+        // Should match when tool_name matches
+        let filter = LogFilter {
+            tool_name: Some("test_tool".to_string()),
+            entry_type: None,
+            after: None,
+            before: None,
+        };
+        assert!(entry.filter(&filter));
+
+        // Should not match when tool_name differs
+        let filter = LogFilter {
+            tool_name: Some("other_tool".to_string()),
+            entry_type: None,
+            after: None,
+            before: None,
+        };
+        assert!(!entry.filter(&filter));
+
+        // Stderr should not match any tool_name
+        let stderr_entry = create_test_entry(
+            2,
+            Utc::now(),
+            LogEntryContent::Stderr {
+                message: "error".to_string(),
+            },
+        );
+        let filter = LogFilter {
+            tool_name: Some("any_tool".to_string()),
+            entry_type: None,
+            after: None,
+            before: None,
+        };
+        assert!(!stderr_entry.filter(&filter));
+    }
+
+    #[test]
+    fn test_filter_by_entry_type() {
+        let request_entry = create_test_entry(
+            1,
+            Utc::now(),
+            LogEntryContent::Request {
+                tool_name: "tool".to_string(),
+                content: serde_json::json!({}),
+            },
+        );
+
+        // Should match correct entry type
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: Some("request".to_string()),
+            after: None,
+            before: None,
+        };
+        assert!(request_entry.filter(&filter));
+
+        // Should not match wrong entry type
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: Some("response".to_string()),
+            after: None,
+            before: None,
+        };
+        assert!(!request_entry.filter(&filter));
+    }
+
+    #[test]
+    fn test_filter_by_timestamp() {
+        let base_time = Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap();
+        let entry = create_test_entry(
+            1,
+            base_time,
+            LogEntryContent::Request {
+                tool_name: "tool".to_string(),
+                content: serde_json::json!({}),
+            },
+        );
+
+        // Should match when timestamp is after "after" filter
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: Some(Utc.with_ymd_and_hms(2024, 1, 15, 11, 0, 0).unwrap()),
+            before: None,
+        };
+        assert!(entry.filter(&filter));
+
+        // Should not match when timestamp is before or equal to "after" filter
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: Some(Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap()),
+            before: None,
+        };
+        assert!(!entry.filter(&filter));
+
+        // Should match when timestamp is before "before" filter
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: None,
+            before: Some(Utc.with_ymd_and_hms(2024, 1, 15, 13, 0, 0).unwrap()),
+        };
+        assert!(entry.filter(&filter));
+
+        // Should not match when timestamp is after or equal to "before" filter
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: None,
+            before: Some(Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap()),
+        };
+        assert!(!entry.filter(&filter));
+    }
+
+    #[test]
+    fn test_filter_combined() {
+        let entry = create_test_entry(
+            1,
+            Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap(),
+            LogEntryContent::Response {
+                tool_name: "my_tool".to_string(),
+                request_id: 1,
+                response: serde_json::json!({"result": "ok"}),
+            },
+        );
+
+        // All conditions match
+        let filter = LogFilter {
+            tool_name: Some("my_tool".to_string()),
+            entry_type: Some("response".to_string()),
+            after: Some(Utc.with_ymd_and_hms(2024, 1, 15, 11, 0, 0).unwrap()),
+            before: Some(Utc.with_ymd_and_hms(2024, 1, 15, 13, 0, 0).unwrap()),
+        };
+        assert!(entry.filter(&filter));
+
+        // One condition doesn't match (tool_name)
+        let filter = LogFilter {
+            tool_name: Some("wrong_tool".to_string()),
+            entry_type: Some("response".to_string()),
+            after: Some(Utc.with_ymd_and_hms(2024, 1, 15, 11, 0, 0).unwrap()),
+            before: Some(Utc.with_ymd_and_hms(2024, 1, 15, 13, 0, 0).unwrap()),
+        };
+        assert!(!entry.filter(&filter));
+    }
+
+    #[test]
+    fn test_empty_filter() {
+        let entry = create_test_entry(
+            1,
+            Utc::now(),
+            LogEntryContent::Error {
+                tool_name: "tool".to_string(),
+                request_id: 1,
+                error: "test error".to_string(),
+            },
+        );
+
+        // Empty filter should match everything
+        let filter = LogFilter {
+            tool_name: None,
+            entry_type: None,
+            after: None,
+            before: None,
+        };
+        assert!(entry.filter(&filter));
+    }
+}
