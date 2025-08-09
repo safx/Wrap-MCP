@@ -132,7 +132,7 @@ impl LogStorage {
         let mut next_id = self.next_id.write().await;
         let id = *next_id;
         *next_id += 1;
-        
+
         // Remove ANSI escape sequences if enabled
         let cleaned_message = if *self.ansi_removal_enabled.read().await {
             Self::remove_ansi_sequences(&message)
@@ -217,12 +217,12 @@ impl LogStorage {
         let entries = self.entries.read().await;
         entries.len()
     }
-    
+
     pub async fn set_ansi_removal(&self, enabled: bool) {
         let mut ansi_removal = self.ansi_removal_enabled.write().await;
         *ansi_removal = enabled;
     }
-    
+
     /// Remove ANSI escape sequences from a string
     fn remove_ansi_sequences(text: &str) -> String {
         // Pattern to match ANSI escape sequences

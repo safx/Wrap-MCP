@@ -42,6 +42,13 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
     - Additionally removes any remaining ANSI escape sequences from stderr output
   - Use this option to preserve the original formatting
 
+- `-w`: Watch the wrapped binary file for changes and automatically restart
+  - Monitors the wrappee binary file for modifications
+  - Automatically restarts the wrapped server when the binary is updated
+  - Uses a 2-second debounce to handle multiple rapid file changes during compilation
+  - Shows old and new PIDs in logs for verification
+  - Useful for development when frequently recompiling the wrapped server
+
 ### Environment Variables
 
 - `WRAP_MCP_TRANSPORT`: Transport method (`stdio` or `http`, default: `stdio`)
@@ -67,6 +74,12 @@ cargo run -- --ansi -- my-mcp-server --option1 value1
 
 # Preserve ANSI escape sequences
 ./target/release/wrap-mcp --ansi -- my-mcp-server --port 8080
+
+# Watch binary file for changes and auto-restart
+./target/release/wrap-mcp -w -- /path/to/my-mcp-server --port 8080
+
+# Combine options: watch + preserve ANSI
+./target/release/wrap-mcp -w --ansi -- /path/to/my-mcp-server
 ```
 
 ## Available Tools

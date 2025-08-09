@@ -2,10 +2,13 @@ pub mod show_log;
 
 use crate::{logging::LogStorage, proxy::ProxyHandler, wrappee::WrappeeClient};
 use anyhow::Result;
+use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::RequestContext};
 use serde_json::Value;
+use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
+use tokio::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub struct WrapServer {
@@ -42,12 +45,18 @@ impl WrapServer {
 
         // Find the "--" separator
         let separator_pos = args.iter().position(|arg| arg == "--");
-        
-        // Check for --ansi option before "--"
-        let preserve_ansi = separator_pos
-            .map(|pos| args[1..pos].contains(&"--ansi".to_string()))
-            .unwrap_or(false);
-        
+
+        // Check for options before "--"
+        let (preserve_ansi, watch_binary) = separator_pos
+            .map(|pos| {
+                let opts = &args[1..pos];
+                (
+                    opts.contains(&"--ansi".to_string()),
+                    opts.contains(&"-w".to_string()),
+                )
+            })
+            .unwrap_or((false, false));
+
         if preserve_ansi {
             tracing::info!("ANSI escape sequences will be preserved (--ansi option)");
             // Store the flag in log storage (false = don't remove ANSI)
@@ -56,6 +65,10 @@ impl WrapServer {
             tracing::info!("ANSI escape sequence removal enabled (default)");
             // Store the flag in log storage (true = remove ANSI)
             self.proxy_handler.log_storage.set_ansi_removal(true).await;
+        }
+
+        if watch_binary {
+            tracing::info!("Binary file watching enabled (-w option)");
         }
 
         let (command, wrappee_args) = match separator_pos {
@@ -91,7 +104,7 @@ impl WrapServer {
         *self.wrappee_command.write().await = Some(command.clone());
         *self.wrappee_args.write().await = Some(wrappee_args.clone());
         *self.disable_colors.write().await = !preserve_ansi;
-        
+
         // Pass !preserve_ansi to disable colors (we want to disable colors by default)
         let mut wrappee_client = WrappeeClient::spawn(&command, &wrappee_args, !preserve_ansi)?;
 
@@ -122,17 +135,123 @@ impl WrapServer {
             }
         });
 
+        // Start file watching if enabled
+        if watch_binary {
+            self.start_file_watching().await?;
+        }
+
+        Ok(())
+    }
+
+    async fn start_file_watching(&self) -> Result<()> {
+        let command = self.wrappee_command.read().await.clone();
+
+        if let Some(binary_path) = command {
+            tracing::info!("Starting file watch for: {}", binary_path);
+
+            // Channel for file change events
+            let (tx, mut rx) = mpsc::channel(100);
+
+            // Create watcher with custom handler
+            let mut watcher = RecommendedWatcher::new(
+                move |res: Result<Event, notify::Error>| {
+                    if let Ok(event) = res {
+                        // Check if it's a modify or create event
+                        if matches!(
+                            event.kind,
+                            EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                        ) {
+                            // Send notification through channel
+                            let _ = tx.blocking_send(());
+                        }
+                    }
+                },
+                Config::default(),
+            )
+            .map_err(|e| {
+                // Panic on watcher creation failure
+                panic!("Failed to create file watcher: {e}");
+            })?;
+
+            // Watch the binary file
+            watcher
+                .watch(Path::new(&binary_path), RecursiveMode::NonRecursive)
+                .map_err(|e| {
+                    // Panic on watch failure
+                    panic!("Failed to watch binary file {binary_path}: {e}");
+                })?;
+
+            // Keep watcher alive by storing it
+            std::mem::forget(watcher);
+
+            // Spawn debounced restart handler
+            let server = self.clone();
+            tokio::spawn(async move {
+                let mut last_event = Instant::now();
+                let mut pending_restart = false;
+
+                loop {
+                    tokio::select! {
+                        Some(_) = rx.recv() => {
+                            tracing::debug!("File change detected for binary");
+                            last_event = Instant::now();
+                            pending_restart = true;
+                        }
+                        _ = tokio::time::sleep(Duration::from_millis(100)) => {
+                            // Check if we should restart (2 second debounce)
+                            if pending_restart && last_event.elapsed() > Duration::from_secs(2) {
+                                tracing::info!("Binary file changed, triggering restart after debounce");
+
+                                // Get PID before restart
+                                let old_pid = {
+                                    let wrappee_guard = server.wrappee.read().await;
+                                    if let Some(wrappee) = wrappee_guard.as_ref() {
+                                        wrappee.get_pid().await
+                                    } else {
+                                        None
+                                    }
+                                };
+
+                                // Perform restart
+                                if let Err(e) = server.restart_wrapped_server().await {
+                                    tracing::error!("Failed to restart wrapped server: {:?}", e);
+                                } else {
+                                    // Get new PID after restart
+                                    let new_pid = {
+                                        let wrappee_guard = server.wrappee.read().await;
+                                        if let Some(wrappee) = wrappee_guard.as_ref() {
+                                            wrappee.get_pid().await
+                                        } else {
+                                            None
+                                        }
+                                    };
+
+                                    tracing::info!("Automatic restart completed (PID: {:?} -> {:?})", old_pid, new_pid);
+                                }
+
+                                pending_restart = false;
+                            }
+                        }
+                    }
+                }
+            });
+
+            tracing::info!("File watching started successfully");
+        } else {
+            tracing::warn!("No binary path available for file watching");
+        }
+
         Ok(())
     }
 
     pub async fn restart_wrapped_server(&self) -> Result<CallToolResult, McpError> {
         tracing::info!("Restarting wrapped server");
-        
+
         // Get stored command and args
         let command = self.wrappee_command.read().await.clone();
         let args = self.wrappee_args.read().await.clone();
         let disable_colors = *self.disable_colors.read().await;
-        
+
         let (command, args) = match (command, args) {
             (Some(cmd), Some(args)) => (cmd, args),
             _ => {
@@ -143,7 +262,7 @@ impl WrapServer {
                 });
             }
         };
-        
+
         // Shutdown existing wrappee
         {
             let mut wrappee_guard = self.wrappee.write().await;
@@ -154,27 +273,26 @@ impl WrapServer {
                 }
             }
         }
-        
+
         // Wait a bit for clean shutdown
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-        
+
         // Start new wrappee
         tracing::info!("Starting new wrapped server: {} {:?}", command, args);
-        let mut wrappee_client = WrappeeClient::spawn(&command, &args, disable_colors)
-            .map_err(|e| McpError {
+        let mut wrappee_client =
+            WrappeeClient::spawn(&command, &args, disable_colors).map_err(|e| McpError {
                 code: ErrorCode::INTERNAL_ERROR,
-                message: format!("Failed to spawn wrapped server: {}", e).into(),
+                message: format!("Failed to spawn wrapped server: {e}").into(),
                 data: None,
             })?;
-        
+
         // Initialize the wrappee
-        wrappee_client.initialize().await
-            .map_err(|e| McpError {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: format!("Failed to initialize wrapped server: {}", e).into(),
-                data: None,
-            })?;
-        
+        wrappee_client.initialize().await.map_err(|e| McpError {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: format!("Failed to initialize wrapped server: {e}").into(),
+            data: None,
+        })?;
+
         // Clear and rediscover tools from wrappee
         self.proxy_handler.clear_tools().await;
         self.proxy_handler
@@ -182,13 +300,13 @@ impl WrapServer {
             .await
             .map_err(|e| McpError {
                 code: ErrorCode::INTERNAL_ERROR,
-                message: format!("Failed to discover tools: {}", e).into(),
+                message: format!("Failed to discover tools: {e}").into(),
                 data: None,
             })?;
-        
+
         // Store the new wrappee client
         *self.wrappee.write().await = Some(wrappee_client);
-        
+
         // Restart stderr monitoring
         let wrappee_clone = self.wrappee.clone();
         let log_storage = self.proxy_handler.log_storage.clone();
@@ -204,10 +322,10 @@ impl WrapServer {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
         });
-        
+
         tracing::info!("Wrapped server restarted successfully");
         Ok(CallToolResult::success(vec![Content::text(
-            "✅ Wrapped server restarted successfully"
+            "✅ Wrapped server restarted successfully",
         )]))
     }
 
@@ -237,7 +355,7 @@ impl WrapServer {
                 })?;
             return show_log::clear_log(req, &self.proxy_handler.log_storage).await;
         }
-        
+
         if name == "restart_wrapped_server" {
             return self.restart_wrapped_server().await;
         }

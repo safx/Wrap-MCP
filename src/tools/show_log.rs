@@ -25,7 +25,7 @@ fn default_limit() -> usize {
 
 fn format_ai_output(logs: Vec<LogEntry>) -> Content {
     let mut output = String::new();
-    
+
     if logs.is_empty() {
         output.push_str("No log entries found.\n");
     } else {
@@ -38,17 +38,20 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
                             obj.iter()
                                 .map(|(k, v)| {
                                     let v_str = match v {
-                                        serde_json::Value::String(s) => format!("\"{}\"", s),
-                                        _ => v.to_string()
+                                        serde_json::Value::String(s) => format!("\"{s}\""),
+                                        _ => v.to_string(),
                                     };
-                                    format!("{}: {}", k, v_str)
+                                    format!("{k}: {v_str}")
                                 })
                                 .collect::<Vec<_>>()
                                 .join(", ")
                         } else {
                             args.to_string()
                         };
-                        output.push_str(&format!("[REQUEST #{}] {}({})\n", log.id, tool_name, args_str));
+                        output.push_str(&format!(
+                            "[REQUEST #{}] {}({})\n",
+                            log.id, tool_name, args_str
+                        ));
                     }
                 }
                 LogEntryType::Response => {
@@ -59,7 +62,9 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
                                     if let Some(arr) = content_array.as_array() {
                                         for item in arr {
                                             if let Some(text) = item["text"].as_str() {
-                                                output.push_str(&format!("[RESPONSE #{}] \"{}\"\n", request_id, text));
+                                                output.push_str(&format!(
+                                                    "[RESPONSE #{request_id}] \"{text}\"\n"
+                                                ));
                                             }
                                         }
                                     }
@@ -71,7 +76,7 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
                 LogEntryType::Error => {
                     if let Some(request_id) = log.content["request_id"].as_u64() {
                         if let Some(error) = log.content["error"].as_str() {
-                            output.push_str(&format!("[ERROR #{}] {}\n", request_id, error));
+                            output.push_str(&format!("[ERROR #{request_id}] {error}\n"));
                         }
                     }
                 }
@@ -86,11 +91,17 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
                             } else {
                                 msg
                             }
-                        } else if msg.contains(" INFO ") || msg.contains(" WARN ") || msg.contains(" ERROR ") || msg.contains(" DEBUG ") {
+                        } else if msg.contains(" INFO ")
+                            || msg.contains(" WARN ")
+                            || msg.contains(" ERROR ")
+                            || msg.contains(" DEBUG ")
+                        {
                             // For other log messages, try to extract after the module path
                             if let Some(module_start) = msg.rfind(" ThreadId") {
                                 if let Some(msg_start) = msg[module_start..].find(": ") {
-                                    if let Some(second_colon) = msg[module_start + msg_start + 2..].find(": ") {
+                                    if let Some(second_colon) =
+                                        msg[module_start + msg_start + 2..].find(": ")
+                                    {
                                         &msg[module_start + msg_start + 2 + second_colon + 2..]
                                     } else {
                                         &msg[module_start + msg_start + 2..]
@@ -104,14 +115,14 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
                         } else {
                             msg
                         };
-                        output.push_str(&format!("[STDERR] {}\n", clean_msg));
+                        output.push_str(&format!("[STDERR] {clean_msg}\n"));
                     }
                 }
             }
             output.push('\n');
         }
     }
-    
+
     Content::text(output)
 }
 
@@ -136,7 +147,7 @@ pub async fn show_log(
     let logs = log_storage.get_logs(Some(req.limit), Some(filter)).await;
     let total_count = log_storage.get_log_count().await;
 
-    let format = req.format.as_deref().unwrap_or("ai");  // Default to AI format
+    let format = req.format.as_deref().unwrap_or("ai").trim(); // Default to AI format
 
     let content = match format {
         "json" => {
@@ -147,9 +158,7 @@ pub async fn show_log(
             });
             Content::text(serde_json::to_string_pretty(&json_output).unwrap())
         }
-        "ai" => {
-            format_ai_output(logs)
-        }
+        "ai" => format_ai_output(logs),
         "text" => {
             let mut output = format!(
                 "📊 Log Entries (showing {} of {})\n",

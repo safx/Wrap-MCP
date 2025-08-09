@@ -23,7 +23,7 @@ impl WrappeeClient {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        
+
         // Set environment variables to disable colors if requested
         if disable_colors {
             cmd.env("NO_COLOR", "1")
@@ -31,10 +31,8 @@ impl WrappeeClient {
                 .env("RUST_LOG_STYLE", "never");
             tracing::debug!("Setting NO_COLOR=1, CLICOLOR=0, RUST_LOG_STYLE=never for wrappee");
         }
-        
-        let mut child = cmd
-            .spawn()
-            .context("Failed to spawn wrappee process")?;
+
+        let mut child = cmd.spawn().context("Failed to spawn wrappee process")?;
 
         let stdin = child.stdin.take().context("Failed to get stdin")?;
         let stdout = child.stdout.take().context("Failed to get stdout")?;
@@ -155,14 +153,14 @@ impl WrappeeClient {
 
         self.send_request(init_request).await?;
         let response = self.wait_for_response().await?;
-        
+
         // Send initialized notification
         let initialized_notification = json!({
             "jsonrpc": "2.0",
             "method": "notifications/initialized"
         });
         self.send_request(initialized_notification).await?;
-        
+
         Ok(response)
     }
 
@@ -191,6 +189,11 @@ impl WrappeeClient {
 
         self.send_request(request).await?;
         self.wait_for_response().await
+    }
+
+    pub async fn get_pid(&self) -> Option<u32> {
+        let child = self.child.lock().await;
+        Some(child.id())
     }
 
     pub async fn shutdown(self) -> Result<()> {

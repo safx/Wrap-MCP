@@ -30,6 +30,7 @@ tracing-subscriber = { version = "0.3", features = [
 ] }
 chrono = { version = "0.4", features = ["serde"] }
 regex = "1.10"
+notify = { version = "6.1", default-features = false, features = ["macos_fsevent"] }
 # Required for streamable HTTP transport (minimal features)
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "http2"] }
 schemars = { version = "1.0" }
