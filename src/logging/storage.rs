@@ -1,11 +1,10 @@
-use chrono::Utc;
 use serde_json::Value;
 use std::collections::VecDeque;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::logging::{LogEntry, LogEntryContent, LogEntryType, LogFilter};
+use crate::logging::{LogEntry, LogFilter};
 
 #[derive(Debug, Clone)]
 pub struct LogStorage {
@@ -47,17 +46,7 @@ impl LogStorage {
         let id = *next_id;
         *next_id += 1;
 
-        let entry = LogEntry {
-            id,
-            timestamp: Utc::now(),
-            content: LogEntryContent::Request {
-                tool_name: tool_name.clone(),
-                content: serde_json::json!({
-                    "tool": tool_name,
-                    "arguments": arguments
-                }),
-            },
-        };
+        let entry = LogEntry::new_request(id, tool_name, arguments);
 
         let mut entries = self.entries.write().await;
         entries.push_back(entry);
@@ -72,15 +61,7 @@ impl LogStorage {
         let id = *next_id;
         *next_id += 1;
 
-        let entry = LogEntry {
-            id,
-            timestamp: Utc::now(),
-            content: LogEntryContent::Response {
-                tool_name,
-                request_id,
-                response,
-            },
-        };
+        let entry = LogEntry::new_response(id, tool_name, request_id, response);
 
         let mut entries = self.entries.write().await;
         entries.push_back(entry);
@@ -94,15 +75,7 @@ impl LogStorage {
         let id = *next_id;
         *next_id += 1;
 
-        let entry = LogEntry {
-            id,
-            timestamp: Utc::now(),
-            content: LogEntryContent::Error {
-                tool_name,
-                request_id,
-                error: error_message.clone(),
-            },
-        };
+        let entry = LogEntry::new_error(id, tool_name, request_id, error_message.clone());
 
         let mut entries = self.entries.write().await;
         entries.push_back(entry);
@@ -128,13 +101,7 @@ impl LogStorage {
             message.clone()
         };
 
-        let entry = LogEntry {
-            id,
-            timestamp: Utc::now(),
-            content: LogEntryContent::Stderr {
-                message: cleaned_message,
-            },
-        };
+        let entry = LogEntry::new_stderr(id, cleaned_message);
 
         let mut entries = self.entries.write().await;
         entries.push_back(entry);
@@ -148,43 +115,7 @@ impl LogStorage {
         let mut result: Vec<LogEntry> = entries.iter().cloned().collect();
 
         if let Some(filter) = filter {
-            result.retain(|entry| {
-                if let Some(ref filter_tool_name) = filter.tool_name {
-                    let matches = match &entry.content {
-                        LogEntryContent::Request { tool_name, .. }
-                        | LogEntryContent::Response { tool_name, .. }
-                        | LogEntryContent::Error { tool_name, .. } => tool_name == filter_tool_name,
-                        LogEntryContent::Stderr { .. } => false,
-                    };
-                    if !matches {
-                        return false;
-                    }
-                }
-                if let Some(ref entry_type) = filter.entry_type {
-                    let entry_log_type: LogEntryType = entry.content.clone().into();
-                    let matches = match (entry_log_type, entry_type.as_str()) {
-                        (LogEntryType::Request, "request")
-                        | (LogEntryType::Response, "response")
-                        | (LogEntryType::Error, "error")
-                        | (LogEntryType::Stderr, "stderr") => true,
-                        _ => false,
-                    };
-                    if !matches {
-                        return false;
-                    }
-                }
-                if let Some(ref after) = filter.after {
-                    if entry.timestamp <= *after {
-                        return false;
-                    }
-                }
-                if let Some(ref before) = filter.before {
-                    if entry.timestamp >= *before {
-                        return false;
-                    }
-                }
-                true
-            });
+            result.retain(|entry| entry.filter(&filter));
         }
 
         // Sort by timestamp descending (newest first)

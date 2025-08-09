@@ -26,21 +26,21 @@ impl ProxyHandler {
 
         let response = wrappee.list_tools().await?;
 
-        if let Some(result) = response.get("result") {
-            if let Some(tools_value) = result.get("tools") {
-                let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
+        if let Some(result) = response.get("result")
+            && let Some(tools_value) = result.get("tools")
+        {
+            let tools: Vec<Tool> = serde_json::from_value(tools_value.clone())?;
 
-                let mut wrappee_tools = self.wrappee_tools.write().await;
-                *wrappee_tools = tools.clone();
+            let mut wrappee_tools = self.wrappee_tools.write().await;
+            *wrappee_tools = tools.clone();
 
-                tracing::info!("Discovered {} tools from wrappee", tools.len());
-                for tool in &tools {
-                    tracing::debug!(
-                        "  - {}: {}",
-                        tool.name,
-                        tool.description.as_deref().unwrap_or("")
-                    );
-                }
+            tracing::info!("Discovered {} tools from wrappee", tools.len());
+            for tool in &tools {
+                tracing::debug!(
+                    "  - {}: {}",
+                    tool.name,
+                    tool.description.as_deref().unwrap_or("")
+                );
             }
         }
 
