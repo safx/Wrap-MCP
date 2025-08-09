@@ -140,27 +140,6 @@ impl ProxyHandler {
     ) -> Result<CallToolResult, McpError> {
         tracing::info!("Proxying tool call: {}", name);
 
-        // Special handling for our own tools
-        if name == "show_log" {
-            let req: crate::tools::show_log::ShowLogRequest = serde_json::from_value(arguments)
-                .map_err(|e| McpError {
-                    code: ErrorCode::INVALID_PARAMS,
-                    message: format!("Invalid parameters: {e}").into(),
-                    data: None,
-                })?;
-            return crate::tools::show_log::show_log(req, &self.log_storage).await;
-        }
-
-        if name == "clear_log" {
-            let req: crate::tools::show_log::ClearLogRequest = serde_json::from_value(arguments)
-                .map_err(|e| McpError {
-                    code: ErrorCode::INVALID_PARAMS,
-                    message: format!("Invalid parameters: {e}").into(),
-                    data: None,
-                })?;
-            return crate::tools::show_log::clear_log(req, &self.log_storage).await;
-        }
-
         // Log the request
         let request_id = self
             .log_storage
