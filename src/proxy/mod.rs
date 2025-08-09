@@ -143,13 +143,7 @@ impl ProxyHandler {
         // Log the request
         let request_id = self
             .log_storage
-            .add_request(
-                Some(name.to_string()),
-                serde_json::json!({
-                    "tool": name,
-                    "arguments": arguments.clone()
-                }),
-            )
+            .add_request(name.to_string(), arguments.clone())
             .await;
 
         // Forward to wrappee
@@ -157,7 +151,7 @@ impl ProxyHandler {
             Ok(response) => {
                 // Log the response
                 self.log_storage
-                    .add_response(request_id, Some(name.to_string()), response.clone())
+                    .add_response(request_id, name.to_string(), response.clone())
                     .await;
 
                 // Extract the result from the response
@@ -183,7 +177,7 @@ impl ProxyHandler {
                     let error_data = error.get("data").cloned();
 
                     self.log_storage
-                        .add_error(request_id, Some(name.to_string()), error_msg.clone())
+                        .add_error(request_id, name.to_string(), error_msg.clone())
                         .await;
 
                     Err(McpError {
@@ -202,7 +196,7 @@ impl ProxyHandler {
                 let error_msg = format!("Failed to call tool: {e}");
 
                 self.log_storage
-                    .add_error(request_id, Some(name.to_string()), error_msg.clone())
+                    .add_error(request_id, name.to_string(), error_msg.clone())
                     .await;
 
                 Err(McpError {

@@ -1,4 +1,4 @@
-use crate::logging::{LogEntry, LogEntryType, LogFilter, LogStorage};
+use crate::logging::{LogEntry, LogEntryContent, LogFilter, LogStorage};
 use anyhow::Result;
 use rmcp::{ErrorData as McpError, model::*};
 use schemars::JsonSchema;
@@ -30,93 +30,87 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
         output.push_str("No log entries found.\n");
     } else {
         for log in &logs {
-            match log.entry_type {
-                LogEntryType::Request => {
-                    if let Some(tool_name) = &log.tool_name {
-                        let args = &log.content["arguments"];
-                        let args_str = if let Some(obj) = args.as_object() {
-                            obj.iter()
-                                .map(|(k, v)| {
-                                    let v_str = match v {
-                                        serde_json::Value::String(s) => format!("\"{s}\""),
-                                        _ => v.to_string(),
-                                    };
-                                    format!("{k}: {v_str}")
-                                })
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        } else {
-                            args.to_string()
-                        };
-                        output.push_str(&format!(
-                            "[REQUEST #{}] {}({})\n",
-                            log.id, tool_name, args_str
-                        ));
-                    }
+            match &log.content {
+                LogEntryContent::Request { tool_name, content } => {
+                    let args = &content["arguments"];
+                    let args_str = if let Some(obj) = args.as_object() {
+                        obj.iter()
+                            .map(|(k, v)| {
+                                let v_str = match v {
+                                    serde_json::Value::String(s) => format!("\"{s}\""),
+                                    _ => v.to_string(),
+                                };
+                                format!("{k}: {v_str}")
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    } else {
+                        args.to_string()
+                    };
+                    output.push_str(&format!(
+                        "[REQUEST #{}] {}({})\n",
+                        log.id, tool_name, args_str
+                    ));
                 }
-                LogEntryType::Response => {
-                    if let Some(request_id) = log.content["request_id"].as_u64() {
-                        if let Some(response) = log.content.get("response") {
-                            if let Some(result) = response.get("result") {
-                                if let Some(content_array) = result.get("content") {
-                                    if let Some(arr) = content_array.as_array() {
-                                        for item in arr {
-                                            if let Some(text) = item["text"].as_str() {
-                                                output.push_str(&format!(
-                                                    "[RESPONSE #{request_id}] \"{text}\"\n"
-                                                ));
-                                            }
-                                        }
+                LogEntryContent::Response {
+                    request_id,
+                    response,
+                    ..
+                } => {
+                    if let Some(result) = response.get("result") {
+                        if let Some(content_array) = result.get("content") {
+                            if let Some(arr) = content_array.as_array() {
+                                for item in arr {
+                                    if let Some(text) = item["text"].as_str() {
+                                        output.push_str(&format!(
+                                            "[RESPONSE #{request_id}] \"{text}\"\n"
+                                        ));
                                     }
                                 }
                             }
                         }
                     }
                 }
-                LogEntryType::Error => {
-                    if let Some(request_id) = log.content["request_id"].as_u64() {
-                        if let Some(error) = log.content["error"].as_str() {
-                            output.push_str(&format!("[ERROR #{request_id}] {error}\n"));
-                        }
-                    }
+                LogEntryContent::Error {
+                    request_id, error, ..
+                } => {
+                    output.push_str(&format!("[ERROR #{request_id}] {error}\n"));
                 }
-                LogEntryType::Stderr => {
-                    if let Some(msg) = log.content["message"].as_str() {
-                        // Extract the essential part of stderr message
-                        // Look for log prefix pattern like "2025-08-08T16:15:53.880856Z  INFO ThreadId(01) module::path: file.rs:123: "
-                        let clean_msg = if let Some(start) = msg.find(": src/") {
-                            // Find the position after the file location
-                            if let Some(pos) = msg[start..].find(": ") {
-                                &msg[start + pos + 2..]
-                            } else {
-                                msg
-                            }
-                        } else if msg.contains(" INFO ")
-                            || msg.contains(" WARN ")
-                            || msg.contains(" ERROR ")
-                            || msg.contains(" DEBUG ")
-                        {
-                            // For other log messages, try to extract after the module path
-                            if let Some(module_start) = msg.rfind(" ThreadId") {
-                                if let Some(msg_start) = msg[module_start..].find(": ") {
-                                    if let Some(second_colon) =
-                                        msg[module_start + msg_start + 2..].find(": ")
-                                    {
-                                        &msg[module_start + msg_start + 2 + second_colon + 2..]
-                                    } else {
-                                        &msg[module_start + msg_start + 2..]
-                                    }
+                LogEntryContent::Stderr { message } => {
+                    // Extract the essential part of stderr message
+                    // Look for log prefix pattern like "2025-08-08T16:15:53.880856Z  INFO ThreadId(01) module::path: file.rs:123: "
+                    let clean_msg = if let Some(start) = message.find(": src/") {
+                        // Find the position after the file location
+                        if let Some(pos) = message[start..].find(": ") {
+                            &message[start + pos + 2..]
+                        } else {
+                            message
+                        }
+                    } else if message.contains(" INFO ")
+                        || message.contains(" WARN ")
+                        || message.contains(" ERROR ")
+                        || message.contains(" DEBUG ")
+                    {
+                        // For other log messages, try to extract after the module path
+                        if let Some(module_start) = message.rfind(" ThreadId") {
+                            if let Some(msg_start) = message[module_start..].find(": ") {
+                                if let Some(second_colon) =
+                                    message[module_start + msg_start + 2..].find(": ")
+                                {
+                                    &message[module_start + msg_start + 2 + second_colon + 2..]
                                 } else {
-                                    msg
+                                    &message[module_start + msg_start + 2..]
                                 }
                             } else {
-                                msg
+                                message
                             }
                         } else {
-                            msg
-                        };
-                        output.push_str(&format!("[STDERR] {clean_msg}\n"));
-                    }
+                            message
+                        }
+                    } else {
+                        message
+                    };
+                    output.push_str(&format!("[STDERR] {clean_msg}\n"));
                 }
             }
             output.push('\n');
@@ -176,16 +170,21 @@ pub async fn show_log(
                         "\n[#{}] {} | {}\n",
                         log.id,
                         log.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-                        match log.entry_type {
-                            LogEntryType::Request => "📤 REQUEST",
-                            LogEntryType::Response => "📥 RESPONSE",
-                            LogEntryType::Error => "❌ ERROR",
-                            LogEntryType::Stderr => "⚠️ STDERR",
+                        match &log.content {
+                            LogEntryContent::Request { .. } => "📤 REQUEST",
+                            LogEntryContent::Response { .. } => "📥 RESPONSE",
+                            LogEntryContent::Error { .. } => "❌ ERROR",
+                            LogEntryContent::Stderr { .. } => "⚠️ STDERR",
                         }
                     ));
 
-                    if let Some(ref tool_name) = log.tool_name {
-                        output.push_str(&format!("Tool: {tool_name}\n"));
+                    match &log.content {
+                        LogEntryContent::Request { tool_name, .. }
+                        | LogEntryContent::Response { tool_name, .. }
+                        | LogEntryContent::Error { tool_name, .. } => {
+                            output.push_str(&format!("Tool: {tool_name}\n"));
+                        }
+                        LogEntryContent::Stderr { .. } => {}
                     }
 
                     output.push_str(&format!(

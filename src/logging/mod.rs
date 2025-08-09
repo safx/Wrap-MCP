@@ -7,14 +7,36 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum LogEntryContent {
+    Request {
+        tool_name: String,
+        content: Value,
+    },
+    Response {
+        tool_name: String,
+        request_id: usize,
+        response: Value,
+    },
+    Error {
+        tool_name: String,
+        request_id: usize,
+        error: String,
+    },
+    Stderr {
+        message: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
     pub id: usize,
     pub timestamp: DateTime<Utc>,
-    pub entry_type: LogEntryType,
-    pub tool_name: Option<String>,
-    pub content: Value,
+    #[serde(flatten)]
+    pub content: LogEntryContent,
 }
 
+// Keep for backwards compatibility in filters
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LogEntryType {
@@ -59,7 +81,7 @@ impl LogStorage {
         }
     }
 
-    pub async fn add_request(&self, tool_name: Option<String>, content: Value) -> usize {
+    pub async fn add_request(&self, tool_name: String, arguments: Value) -> usize {
         let mut next_id = self.next_id.write().await;
         let id = *next_id;
         *next_id += 1;
@@ -67,9 +89,13 @@ impl LogStorage {
         let entry = LogEntry {
             id,
             timestamp: Utc::now(),
-            entry_type: LogEntryType::Request,
-            tool_name,
-            content,
+            content: LogEntryContent::Request {
+                tool_name: tool_name.clone(),
+                content: serde_json::json!({
+                    "tool": tool_name,
+                    "arguments": arguments
+                }),
+            },
         };
 
         let mut entries = self.entries.write().await;
@@ -80,7 +106,7 @@ impl LogStorage {
         id
     }
 
-    pub async fn add_response(&self, request_id: usize, tool_name: Option<String>, content: Value) {
+    pub async fn add_response(&self, request_id: usize, tool_name: String, response: Value) {
         let mut next_id = self.next_id.write().await;
         let id = *next_id;
         *next_id += 1;
@@ -88,12 +114,11 @@ impl LogStorage {
         let entry = LogEntry {
             id,
             timestamp: Utc::now(),
-            entry_type: LogEntryType::Response,
-            tool_name,
-            content: serde_json::json!({
-                "request_id": request_id,
-                "response": content
-            }),
+            content: LogEntryContent::Response {
+                tool_name,
+                request_id,
+                response,
+            },
         };
 
         let mut entries = self.entries.write().await;
@@ -103,7 +128,7 @@ impl LogStorage {
         tracing::info!("Logged response #{} for request #{}", id, request_id);
     }
 
-    pub async fn add_error(&self, request_id: usize, tool_name: Option<String>, error: String) {
+    pub async fn add_error(&self, request_id: usize, tool_name: String, error_message: String) {
         let mut next_id = self.next_id.write().await;
         let id = *next_id;
         *next_id += 1;
@@ -111,12 +136,11 @@ impl LogStorage {
         let entry = LogEntry {
             id,
             timestamp: Utc::now(),
-            entry_type: LogEntryType::Error,
-            tool_name,
-            content: serde_json::json!({
-                "request_id": request_id,
-                "error": error
-            }),
+            content: LogEntryContent::Error {
+                tool_name,
+                request_id,
+                error: error_message.clone(),
+            },
         };
 
         let mut entries = self.entries.write().await;
@@ -127,7 +151,7 @@ impl LogStorage {
             "Logged error #{} for request #{}: {}",
             id,
             request_id,
-            error
+            error_message
         );
     }
 
@@ -146,11 +170,9 @@ impl LogStorage {
         let entry = LogEntry {
             id,
             timestamp: Utc::now(),
-            entry_type: LogEntryType::Stderr,
-            tool_name: None,
-            content: serde_json::json!({
-                "message": cleaned_message
-            }),
+            content: LogEntryContent::Stderr {
+                message: cleaned_message,
+            },
         };
 
         let mut entries = self.entries.write().await;
@@ -166,18 +188,24 @@ impl LogStorage {
 
         if let Some(filter) = filter {
             result.retain(|entry| {
-                if let Some(ref tool_name) = filter.tool_name {
-                    if entry.tool_name.as_ref() != Some(tool_name) {
+                if let Some(ref filter_tool_name) = filter.tool_name {
+                    let matches = match &entry.content {
+                        LogEntryContent::Request { tool_name, .. }
+                        | LogEntryContent::Response { tool_name, .. }
+                        | LogEntryContent::Error { tool_name, .. } => tool_name == filter_tool_name,
+                        LogEntryContent::Stderr { .. } => false,
+                    };
+                    if !matches {
                         return false;
                     }
                 }
                 if let Some(ref entry_type) = filter.entry_type {
                     if !matches!(
-                        (&entry.entry_type, entry_type.as_str()),
-                        (LogEntryType::Request, "request")
-                            | (LogEntryType::Response, "response")
-                            | (LogEntryType::Error, "error")
-                            | (LogEntryType::Stderr, "stderr")
+                        (&entry.content, entry_type.as_str()),
+                        (LogEntryContent::Request { .. }, "request")
+                            | (LogEntryContent::Response { .. }, "response")
+                            | (LogEntryContent::Error { .. }, "error")
+                            | (LogEntryContent::Stderr { .. }, "stderr")
                     ) {
                         return false;
                     }

@@ -11,7 +11,7 @@ mod tests {
         // Add some logs
         let req_id = storage
             .add_request(
-                Some("test_tool".to_string()),
+                "test_tool".to_string(),
                 serde_json::json!({"param": "value"}),
             )
             .await;
@@ -19,7 +19,7 @@ mod tests {
         storage
             .add_response(
                 req_id,
-                Some("test_tool".to_string()),
+                "test_tool".to_string(),
                 serde_json::json!({"result": "success"}),
             )
             .await;
@@ -57,7 +57,7 @@ mod tests {
         // Add more logs than the limit
         for i in 0..10 {
             storage
-                .add_request(Some(format!("tool_{}", i)), serde_json::json!({"index": i}))
+                .add_request(format!("tool_{}", i), serde_json::json!({"index": i}))
                 .await;
         }
 
