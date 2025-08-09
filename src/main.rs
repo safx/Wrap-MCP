@@ -1,7 +1,7 @@
 use anyhow::Result;
 use std::env;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-use wrap_mcp::{WrapServer, server};
+use wrap_mcp::{WrapServer, run};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -27,8 +27,8 @@ async fn main() -> Result<()> {
     };
 
     match transport.as_str() {
-        "stdio" => server::run_stdio_server(service_factory).await,
-        "streamable-http" | "http" => server::run_http_server(service_factory).await,
+        "stdio" => run::run_stdio_server(service_factory).await,
+        "streamable-http" | "http" => run::run_http_server(service_factory).await,
         _ => {
             tracing::error!("Unknown transport: {}", transport);
             anyhow::bail!(
