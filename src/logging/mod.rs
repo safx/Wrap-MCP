@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::VecDeque;
 use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -25,33 +26,35 @@ pub enum LogEntryType {
 
 #[derive(Debug, Clone)]
 pub struct LogStorage {
-    entries: Arc<RwLock<Vec<LogEntry>>>,
+    entries: Arc<RwLock<VecDeque<LogEntry>>>,
     next_id: Arc<RwLock<usize>>,
     max_entries: usize,
     ansi_removal_enabled: Arc<RwLock<bool>>,
 }
 
+const DEFAULT_MAX_ENTRIES: usize = 1000;
+
 impl LogStorage {
     pub fn new() -> Self {
         let max_entries = env::var("WRAP_MCP_LOGSIZE")
             .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(1000);
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_MAX_ENTRIES);
 
         tracing::info!("Log storage initialized with max entries: {}", max_entries);
 
         Self {
-            entries: Arc::new(RwLock::new(Vec::new())),
+            entries: Arc::new(RwLock::new(VecDeque::new())),
             next_id: Arc::new(RwLock::new(1)),
             max_entries,
             ansi_removal_enabled: Arc::new(RwLock::new(true)), // Default to removing ANSI
         }
     }
 
-    async fn trim_entries(&self, entries: &mut Vec<LogEntry>) {
+    async fn trim_entries(&self, entries: &mut VecDeque<LogEntry>) {
         if entries.len() > self.max_entries {
             let remove_count = entries.len() - self.max_entries;
-            entries.drain(0..remove_count);
+            entries.drain(..remove_count);
             tracing::debug!("Trimmed {} old log entries", remove_count);
         }
     }
@@ -70,7 +73,7 @@ impl LogStorage {
         };
 
         let mut entries = self.entries.write().await;
-        entries.push(entry);
+        entries.push_back(entry);
         self.trim_entries(&mut entries).await;
 
         tracing::info!("Logged request #{}", id);
@@ -94,7 +97,7 @@ impl LogStorage {
         };
 
         let mut entries = self.entries.write().await;
-        entries.push(entry);
+        entries.push_back(entry);
         self.trim_entries(&mut entries).await;
 
         tracing::info!("Logged response #{} for request #{}", id, request_id);
@@ -117,7 +120,7 @@ impl LogStorage {
         };
 
         let mut entries = self.entries.write().await;
-        entries.push(entry);
+        entries.push_back(entry);
         self.trim_entries(&mut entries).await;
 
         tracing::error!(
@@ -151,7 +154,7 @@ impl LogStorage {
         };
 
         let mut entries = self.entries.write().await;
-        entries.push(entry);
+        entries.push_back(entry);
         self.trim_entries(&mut entries).await;
 
         tracing::warn!("Logged stderr #{}: {}", id, message);
@@ -159,7 +162,7 @@ impl LogStorage {
 
     pub async fn get_logs(&self, limit: Option<usize>, filter: Option<LogFilter>) -> Vec<LogEntry> {
         let entries = self.entries.read().await;
-        let mut result: Vec<LogEntry> = entries.clone();
+        let mut result: Vec<LogEntry> = entries.iter().cloned().collect();
 
         if let Some(filter) = filter {
             result.retain(|entry| {
