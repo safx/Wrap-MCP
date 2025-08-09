@@ -52,7 +52,9 @@ where
 
     axum::serve(tcp_listener, router)
         .with_graceful_shutdown(async {
-            tokio::signal::ctrl_c().await.unwrap();
+            if let Err(e) = tokio::signal::ctrl_c().await {
+                tracing::error!("Failed to listen for ctrl-c signal: {}", e);
+            }
             tracing::info!("Received shutdown signal");
         })
         .await?;

@@ -60,9 +60,9 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
                     response,
                     ..
                 } => {
-                    if let Some(result) = response.get("result") {
-                        if let Some(content_array) = result.get("content") {
-                            if let Some(arr) = content_array.as_array() {
+                    if let Some(result) = response.get("result")
+                        && let Some(content_array) = result.get("content")
+                            && let Some(arr) = content_array.as_array() {
                                 for item in arr {
                                     if let Some(text) = item["text"].as_str() {
                                         output.push_str(&format!(
@@ -71,8 +71,6 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
                                     }
                                 }
                             }
-                        }
-                    }
                 }
                 LogEntryContent::Error {
                     request_id, error, ..
