@@ -59,6 +59,9 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
 - `WRAP_MCP_PROTOCOL_VERSION`: Protocol version to use when initializing the wrapped server (default: `2025.06.18`)
   - This allows compatibility with wrapped servers that require specific protocol versions
   - Example: `WRAP_MCP_PROTOCOL_VERSION="2024.12.01"`
+- `WRAP_MCP_TOOL_TIMEOUT`: Timeout for tool calls in seconds (default: 30)
+  - Controls how long to wait for a tool response before timing out
+  - Example: `WRAP_MCP_TOOL_TIMEOUT=60` (1 minute timeout)
 - `RUST_LOG`: Log level configuration (e.g., `info`, `debug`, `trace`)
 
 ### Examples
@@ -66,6 +69,7 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
 ```bash
 # Wrap and launch another MCP server (ANSI removed by default)
 WRAP_MCP_LOGSIZE=500 \
+WRAP_MCP_TOOL_TIMEOUT=60 \
 RUST_LOG=info \
 cargo run -- my-mcp-server --option1 value1
 

@@ -5,6 +5,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task;
+use tokio::time::{Duration, timeout};
 
 #[derive(Debug)]
 pub struct WrappeeClient {
@@ -12,11 +13,12 @@ pub struct WrappeeClient {
     stdin: Arc<Mutex<std::process::ChildStdin>>,
     stdout_rx: mpsc::Receiver<String>,
     stderr_rx: mpsc::Receiver<String>,
+    timeout_duration: Duration,
 }
 
 impl WrappeeClient {
     pub fn spawn(command: &str, args: &[String], disable_colors: bool) -> Result<Self> {
-        tracing::info!("Spawning wrappee process: {} {:?}", command, args);
+        tracing::info!("Spawning wrappee process: {command} {args:?}");
 
         let mut cmd = Command::new(command);
         cmd.args(args)
@@ -48,14 +50,14 @@ impl WrappeeClient {
             for line in reader.lines() {
                 match line {
                     Ok(line) => {
-                        tracing::debug!("Read line from wrappee stdout: {}", line);
+                        tracing::debug!("Read line from wrappee stdout: {line}");
                         if stdout_tx.blocking_send(line).is_err() {
                             tracing::error!("Failed to send line to channel");
                             break;
                         }
                     }
                     Err(e) => {
-                        tracing::error!("Error reading stdout: {}", e);
+                        tracing::error!("Error reading stdout: {e}");
                         break;
                     }
                 }
@@ -77,7 +79,7 @@ impl WrappeeClient {
                         }
                     }
                     Err(e) => {
-                        tracing::error!("Error reading stderr: {}", e);
+                        tracing::error!("Error reading stderr: {e}");
                         break;
                     }
                 }
@@ -85,11 +87,20 @@ impl WrappeeClient {
             tracing::debug!("Stderr reader finished");
         });
 
+        // Read timeout from environment variable, default to 30 seconds
+        let timeout_secs = std::env::var("WRAP_MCP_TOOL_TIMEOUT")
+            .ok()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(30);
+
+        tracing::info!("Tool timeout set to {} seconds", timeout_secs);
+
         Ok(Self {
             child: Arc::new(Mutex::new(child)),
             stdin: Arc::new(Mutex::new(stdin)),
             stdout_rx,
             stderr_rx,
+            timeout_duration: Duration::from_secs(timeout_secs),
         })
     }
 
@@ -115,23 +126,31 @@ impl WrappeeClient {
 
     pub async fn receive_stderr(&mut self) -> Result<Option<String>> {
         if let Ok(line) = self.stderr_rx.try_recv() {
-            tracing::debug!("Received stderr from wrappee: {}", line);
+            tracing::debug!("Received stderr from wrappee: {line}");
             return Ok(Some(line));
         }
         Ok(None)
     }
 
     pub async fn wait_for_response(&mut self) -> Result<Value> {
-        tracing::debug!("Waiting for response from wrappee...");
-        match self.stdout_rx.recv().await {
-            Some(line) => {
-                tracing::debug!("Received response from wrappee: {}", line);
+        let timeout_duration = self.timeout_duration.as_secs();
+        tracing::debug!(
+            "Waiting for response from wrappee (timeout: {timeout_duration} seconds)...",
+        );
+
+        match timeout(self.timeout_duration, self.stdout_rx.recv()).await {
+            Ok(Some(line)) => {
+                tracing::debug!("Received response from wrappee: {line}");
                 let response: Value = serde_json::from_str(&line)?;
                 Ok(response)
             }
-            None => {
+            Ok(None) => {
                 tracing::error!("Channel closed - no more messages available");
                 anyhow::bail!("Wrappee stdout closed unexpectedly")
+            }
+            Err(_) => {
+                tracing::error!("Tool call timed out after {timeout_duration} seconds",);
+                anyhow::bail!("Tool call timed out after {timeout_duration} seconds",)
             }
         }
     }
@@ -141,10 +160,7 @@ impl WrappeeClient {
         let protocol_version =
             std::env::var("WRAP_MCP_PROTOCOL_VERSION").unwrap_or_else(|_| "2025.06.18".to_string());
 
-        tracing::info!(
-            "Initializing wrappee with protocol version: {}",
-            protocol_version
-        );
+        tracing::info!("Initializing wrappee with protocol version: {protocol_version}",);
 
         let init_request = json!({
             "jsonrpc": "2.0",
@@ -186,6 +202,11 @@ impl WrappeeClient {
     }
 
     pub async fn call_tool(&mut self, name: &str, arguments: Value) -> Result<Value> {
+        tracing::info!(
+            "Calling tool '{name}' with timeout {timeout_duration} seconds",
+            timeout_duration = self.timeout_duration.as_secs()
+        );
+
         let request = json!({
             "jsonrpc": "2.0",
             "id": 3,
@@ -197,7 +218,10 @@ impl WrappeeClient {
         });
 
         self.send_request(request).await?;
-        self.wait_for_response().await
+
+        self.wait_for_response()
+            .await
+            .with_context(|| format!("Tool '{name}' execution failed"))
     }
 
     pub async fn get_pid(&self) -> Option<u32> {
