@@ -13,11 +13,13 @@ Wrap-MCP wraps existing MCP servers and provides the following features:
 - 🔁 Auto-restart on binary file changes (development mode)
 - 🎨 ANSI escape sequence handling for clean logs
 
+**Note**: Wrap-MCP currently only supports wrapping MCP servers that use stdio transport. The wrapped server (wrappee) must communicate via stdin/stdout.
+
 ## System Architecture
 
 ```
 MCP Client ◄────────► Wrap-MCP ◄────────► Wrappee (MCP Server)
-                          │
+   (stdio/http)           │                    (stdio only)
                       Log Storage
                    (In-Memory VecDeque)
 ```
@@ -55,7 +57,9 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
 
 ### Environment Variables
 
-- `WRAP_MCP_TRANSPORT`: Transport method (`stdio` or `http`, default: `stdio`)
+- `WRAP_MCP_TRANSPORT`: Transport method for client connection (`stdio` or `http`, default: `stdio`)
+  - This controls how MCP clients connect to Wrap-MCP
+  - The wrapped server always uses stdio regardless of this setting
 - `WRAP_MCP_LOGSIZE`: Maximum number of log entries to retain (default: 1000)
 - `WRAP_MCP_PROTOCOL_VERSION`: Protocol version to use when initializing the wrapped server (default: `2025.06.18`)
   - This allows compatibility with wrapped servers that require specific protocol versions
