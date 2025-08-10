@@ -19,7 +19,7 @@ async fn main() -> Result<()> {
         let server_clone = server.clone();
         tokio::spawn(async move {
             if let Err(e) = server_clone.initialize_wrappee().await {
-                tracing::error!("Failed to initialize wrappee: {}", e);
+                tracing::error!("Failed to initialize wrappee: {e}");
             }
         });
 
@@ -30,11 +30,8 @@ async fn main() -> Result<()> {
         "stdio" => run::run_stdio_server(service_factory).await,
         "streamable-http" | "http" => run::run_http_server(service_factory).await,
         _ => {
-            tracing::error!("Unknown transport: {}", transport);
-            anyhow::bail!(
-                "Unknown transport: {}. Use 'stdio' or 'streamable-http'",
-                transport
-            )
+            tracing::error!("Unknown transport: {transport}");
+            anyhow::bail!("Unknown transport: {transport}. Use 'stdio' or 'streamable-http'",)
         }
     }
 }

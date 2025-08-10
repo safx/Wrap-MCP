@@ -72,7 +72,7 @@ impl WrappeeClient {
             for line in reader.lines() {
                 match line {
                     Ok(line) => {
-                        tracing::info!("Wrappee stderr: {}", line);
+                        tracing::info!("Wrappee stderr: {line}");
                         if stderr_tx.blocking_send(line).is_err() {
                             tracing::error!("Failed to send stderr line to channel");
                             break;
@@ -93,7 +93,7 @@ impl WrappeeClient {
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(30);
 
-        tracing::info!("Tool timeout set to {} seconds", timeout_secs);
+        tracing::info!("Tool timeout set to {timeout_secs} seconds");
 
         Ok(Self {
             child: Arc::new(Mutex::new(child)),
@@ -106,7 +106,7 @@ impl WrappeeClient {
 
     pub async fn send_request(&mut self, request: Value) -> Result<()> {
         let request_str = serde_json::to_string(&request)?;
-        tracing::debug!("Sending request to wrappee: {}", request_str);
+        tracing::debug!("Sending request to wrappee: {request_str}");
 
         let mut stdin = self.stdin.lock().await;
         writeln!(stdin, "{request_str}")?;
@@ -117,7 +117,7 @@ impl WrappeeClient {
 
     pub async fn receive_response(&mut self) -> Result<Option<Value>> {
         if let Ok(line) = self.stdout_rx.try_recv() {
-            tracing::debug!("Received response from wrappee: {}", line);
+            tracing::debug!("Received response from wrappee: {line}");
             let response: Value = serde_json::from_str(&line)?;
             return Ok(Some(response));
         }

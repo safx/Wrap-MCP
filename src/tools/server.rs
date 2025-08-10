@@ -3,7 +3,11 @@ use crate::tools::show_log::{ShowLogRequest, show_log};
 use crate::{logging::LogStorage, proxy::ProxyHandler, wrappee::WrappeeClient};
 use anyhow::Result;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
-use rmcp::{ErrorData as McpError, RoleServer, ServerHandler, model::*, service::RequestContext};
+use rmcp::{
+    ErrorData as McpError, RoleServer, ServerHandler,
+    model::*,
+    service::{Peer, RequestContext},
+};
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
@@ -17,6 +21,7 @@ pub struct WrapServer {
     wrappee_command: Arc<RwLock<Option<String>>>,
     wrappee_args: Arc<RwLock<Option<Vec<String>>>>,
     disable_colors: Arc<RwLock<bool>>,
+    peer: Arc<RwLock<Option<Peer<RoleServer>>>>,
 }
 
 impl Default for WrapServer {
@@ -36,6 +41,7 @@ impl WrapServer {
             wrappee_command: Arc::new(RwLock::new(None)),
             wrappee_args: Arc::new(RwLock::new(None)),
             disable_colors: Arc::new(RwLock::new(false)),
+            peer: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -94,11 +100,7 @@ impl WrapServer {
             }
         };
 
-        tracing::info!(
-            "Initializing wrappee with command: {} {:?}",
-            command,
-            wrappee_args
-        );
+        tracing::info!("Initializing wrappee with command: {command} {wrappee_args:?}");
 
         // Store command and args for potential restart
         *self.wrappee_command.write().await = Some(command.clone());
@@ -147,7 +149,7 @@ impl WrapServer {
         let command = self.wrappee_command.read().await.clone();
 
         if let Some(binary_path) = command {
-            tracing::info!("Starting file watch for: {}", binary_path);
+            tracing::info!("Starting file watch for: {binary_path}");
 
             // Channel for file change events
             let (tx, mut rx) = mpsc::channel(100);
@@ -213,8 +215,8 @@ impl WrapServer {
                                 };
 
                                 // Perform restart
-                                if let Err(e) = server.restart_wrapped_server(None).await {
-                                    tracing::error!("Failed to restart wrapped server: {:?}", e);
+                                if let Err(e) = server.restart_wrapped_server().await {
+                                    tracing::error!("Failed to restart wrapped server: {e:?}");
                                 } else {
                                     // Get new PID after restart
                                     let new_pid = {
@@ -226,7 +228,7 @@ impl WrapServer {
                                         }
                                     };
 
-                                    tracing::info!("Automatic restart completed (PID: {:?} -> {:?})", old_pid, new_pid);
+                                    tracing::info!("Automatic restart completed (PID: {old_pid:?} -> {new_pid:?})");
                                 }
 
                                 pending_restart = false;
@@ -244,10 +246,7 @@ impl WrapServer {
         Ok(())
     }
 
-    pub async fn restart_wrapped_server(
-        &self,
-        context: Option<RequestContext<RoleServer>>,
-    ) -> Result<CallToolResult, McpError> {
+    pub async fn restart_wrapped_server(&self) -> Result<CallToolResult, McpError> {
         tracing::info!("Restarting wrapped server");
 
         // Get stored command and args
@@ -272,7 +271,7 @@ impl WrapServer {
             if let Some(client) = wrappee_guard.take() {
                 tracing::info!("Shutting down existing wrapped server");
                 if let Err(e) = client.shutdown().await {
-                    tracing::warn!("Error during shutdown: {}", e);
+                    tracing::warn!("Error during shutdown: {e}");
                 }
             }
         }
@@ -281,7 +280,7 @@ impl WrapServer {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         // Start new wrappee
-        tracing::info!("Starting new wrapped server: {} {:?}", command, args);
+        tracing::info!("Starting new wrapped server: {command} {args:?}");
         let mut wrappee_client =
             WrappeeClient::spawn(&command, &args, disable_colors).map_err(|e| McpError {
                 code: ErrorCode::INTERNAL_ERROR,
@@ -310,13 +309,14 @@ impl WrapServer {
         // Store the new wrappee client
         *self.wrappee.write().await = Some(wrappee_client);
 
-        // Send tool list changed notification if context is available
-        if let Some(ctx) = context {
-            let peer = ctx.peer;
+        // Send tool list changed notification if peer is available
+        if let Some(peer) = self.peer.read().await.as_ref() {
             tracing::info!("Sending tools/list_changed notification to client");
             if let Err(e) = peer.notify_tool_list_changed().await {
-                tracing::warn!("Failed to send tool list changed notification: {}", e);
+                tracing::warn!("Failed to send tool list changed notification: {e}");
             }
+        } else {
+            tracing::info!("No peer available for tool list changed notification");
         }
 
         // Restart stderr monitoring
@@ -404,8 +404,11 @@ impl ServerHandler for WrapServer {
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParam>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
+        // Store peer for future notifications
+        *self.peer.write().await = Some(context.peer.clone());
+
         let tools = self.proxy_handler.get_all_tools().await;
         Ok(ListToolsResult {
             tools,
@@ -418,14 +421,17 @@ impl ServerHandler for WrapServer {
         request: CallToolRequestParam,
         context: RequestContext<RoleServer>,
     ) -> Result<CallToolResult, McpError> {
+        // Store peer for future notifications
+        *self.peer.write().await = Some(context.peer.clone());
+
         let arguments = request
             .arguments
             .map(serde_json::Value::Object)
             .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
-        // Pass context for restart_wrapped_server to send notifications
+        // Handle restart_wrapped_server
         if request.name == "restart_wrapped_server" {
-            self.restart_wrapped_server(Some(context)).await
+            self.restart_wrapped_server().await
         } else {
             self.call_tool_dynamic(&request.name, arguments).await
         }

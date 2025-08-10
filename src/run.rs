@@ -34,7 +34,7 @@ where
 {
     const BIND_ADDRESS: &str = "127.0.0.1:8000";
 
-    tracing::info!("Initializing streamable HTTP transport on {}", BIND_ADDRESS);
+    tracing::info!("Initializing streamable HTTP transport on {BIND_ADDRESS}");
 
     let service = StreamableHttpService::new(
         service_factory,
@@ -46,15 +46,12 @@ where
     let tcp_listener = tokio::net::TcpListener::bind(BIND_ADDRESS).await?;
 
     tracing::info!(
-        "Server started successfully on streamable HTTP transport at http://{}/mcp",
-        BIND_ADDRESS
+        "Server started successfully on streamable HTTP transport at http://{BIND_ADDRESS}/mcp",
     );
 
     axum::serve(tcp_listener, router)
         .with_graceful_shutdown(async {
-            if let Err(e) = tokio::signal::ctrl_c().await {
-                tracing::error!("Failed to listen for ctrl-c signal: {}", e);
-            }
+            tokio::signal::ctrl_c().await.unwrap();
             tracing::info!("Received shutdown signal");
         })
         .await?;

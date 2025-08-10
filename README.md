@@ -50,6 +50,7 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
   - Automatically restarts the wrapped server when the binary is updated
   - Uses a 2-second debounce to handle multiple rapid file changes during compilation
   - Shows old and new PIDs in logs for verification
+  - Sends `notifications/tools/list_changed` to MCP clients after restart
   - Useful for development when frequently recompiling the wrapped server
 
 ### Environment Variables
@@ -125,6 +126,11 @@ This is useful when:
 - The wrapped server becomes unresponsive
 - You want to reload the wrapped server after updating its code
 - You need to reset the wrapped server's state
+
+Features:
+- Sends `notifications/tools/list_changed` to notify MCP clients of tool updates
+- Preserves all existing logs during restart
+- Automatically rediscovers tools from the restarted server
 
 Note: During restart, client requests will fail temporarily.
 

@@ -23,7 +23,7 @@ impl LogStorage {
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_MAX_ENTRIES);
 
-        tracing::info!("Log storage initialized with max entries: {}", max_entries);
+        tracing::info!("Log storage initialized with max entries: {max_entries}");
 
         Self {
             entries: Arc::new(RwLock::new(VecDeque::new())),
@@ -50,7 +50,7 @@ impl LogStorage {
         if entries.len() > self.max_entries {
             let remove_count = entries.len() - self.max_entries;
             entries.drain(..remove_count);
-            tracing::debug!("Trimmed {} old log entries", remove_count);
+            tracing::debug!("Trimmed {remove_count} old log entries");
         }
     }
 
@@ -58,7 +58,7 @@ impl LogStorage {
         let id = self.get_next_id().await;
         let entry = LogEntry::new_request(id, tool_name, arguments);
         self.add_entry(entry).await;
-        tracing::info!("Logged request #{}", id);
+        tracing::info!("Logged request #{id}");
         id
     }
 

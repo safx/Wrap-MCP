@@ -144,7 +144,7 @@ impl ProxyHandler {
         arguments: Value,
         wrappee: &mut WrappeeClient,
     ) -> Result<CallToolResult, McpError> {
-        tracing::info!("Proxying tool call: {}", name);
+        tracing::info!("Proxying tool call: {name}");
 
         // Log the request
         let request_id = self
@@ -169,7 +169,7 @@ impl ProxyHandler {
                     } else {
                         // Try to construct a CallToolResult from the response
                         Ok(CallToolResult::success(vec![Content::text(
-                            serde_json::to_string_pretty(&result)
+                            serde_json::to_string(&result)
                                 .unwrap_or_else(|_| result.to_string()),
                         )]))
                     }
@@ -193,7 +193,7 @@ impl ProxyHandler {
                     })
                 } else {
                     Ok(CallToolResult::success(vec![Content::text(
-                        serde_json::to_string_pretty(&response)
+                        serde_json::to_string(&response)
                             .unwrap_or_else(|_| response.to_string()),
                     )]))
                 }

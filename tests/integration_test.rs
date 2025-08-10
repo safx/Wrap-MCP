@@ -58,7 +58,7 @@ mod tests {
         // Add more logs than the limit
         for i in 0..10 {
             storage
-                .add_request(format!("tool_{}", i), serde_json::json!({"index": i}))
+                .add_request(format!("tool_{i}"), serde_json::json!({"index": i}))
                 .await;
         }
 

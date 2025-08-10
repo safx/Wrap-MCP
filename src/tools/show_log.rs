@@ -51,8 +51,8 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
                         args.to_string()
                     };
                     output.push_str(&format!(
-                        "[REQUEST #{}] {}({})\n",
-                        log.id, tool_name, args_str
+                        "[REQUEST #{id}] {tool_name}({args_str})\n",
+                        id = log.id
                     ));
                 }
                 LogEntryContent::Response {
