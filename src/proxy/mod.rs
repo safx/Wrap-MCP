@@ -25,6 +25,10 @@ impl ProxyHandler {
         tracing::info!("Discovering tools from wrappee");
 
         let response = wrappee.list_tools().await?;
+        tracing::info!(
+            "tools/list response: {}",
+            serde_json::to_string_pretty(&response)?
+        );
 
         if let Some(result) = response.get("result")
             && let Some(tools_value) = result.get("tools")
@@ -33,7 +37,7 @@ impl ProxyHandler {
 
             let mut wrappee_tools = self.wrappee_tools.write().await;
 
-            let len = wrappee_tools.len();
+            let len = tools.len();
             tracing::info!("Discovered {len} tools from wrappee");
 
             for tool in &tools {

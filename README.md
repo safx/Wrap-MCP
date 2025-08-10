@@ -61,9 +61,9 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
   - This controls how MCP clients connect to Wrap-MCP
   - The wrapped server always uses stdio regardless of this setting
 - `WRAP_MCP_LOGSIZE`: Maximum number of log entries to retain (default: 1000)
-- `WRAP_MCP_PROTOCOL_VERSION`: Protocol version to use when initializing the wrapped server (default: `2025.06.18`)
+- `WRAP_MCP_PROTOCOL_VERSION`: Protocol version to use when initializing the wrapped server (default: `2025.03.26`)
   - This allows compatibility with wrapped servers that require specific protocol versions
-  - Example: `WRAP_MCP_PROTOCOL_VERSION="2024.12.01"`
+  - Example: `WRAP_MCP_PROTOCOL_VERSION="2025.06.18"`
 - `WRAP_MCP_TOOL_TIMEOUT`: Timeout for tool calls in seconds (default: 30)
   - Controls how long to wait for a tool response before timing out
   - Example: `WRAP_MCP_TOOL_TIMEOUT=60` (1 minute timeout)

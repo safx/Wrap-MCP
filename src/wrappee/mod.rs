@@ -158,7 +158,7 @@ impl WrappeeClient {
     pub async fn initialize(&mut self) -> Result<Value> {
         // Get protocol version from environment variable or use default
         let protocol_version =
-            std::env::var("WRAP_MCP_PROTOCOL_VERSION").unwrap_or_else(|_| "2025.06.18".to_string());
+            std::env::var("WRAP_MCP_PROTOCOL_VERSION").unwrap_or_else(|_| "2025.03.26".to_string());
 
         tracing::info!("Initializing wrappee with protocol version: {protocol_version}",);
 
