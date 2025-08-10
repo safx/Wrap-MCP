@@ -67,6 +67,9 @@ wrap-mcp [wrap-mcp options] -- <wrappee_command> [wrappee arguments]
 - `WRAP_MCP_TOOL_TIMEOUT`: Timeout for tool calls in seconds (default: 30)
   - Controls how long to wait for a tool response before timing out
   - Example: `WRAP_MCP_TOOL_TIMEOUT=60` (1 minute timeout)
+- `WRAP_MCP_LOG_COLORS`: Enable ANSI color codes in log output (default: `false`)
+  - Set to `true` or `1` to enable colors in terminal output
+  - Default is disabled for compatibility with MCP Inspector and other tools
 - `RUST_LOG`: Log level configuration (e.g., `info`, `debug`, `trace`)
 
 ### Examples

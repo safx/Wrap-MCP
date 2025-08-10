@@ -88,11 +88,17 @@ async fn main() -> Result<()> {
 fn init_tracing() {
     let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
+    // Check if ANSI colors should be disabled (default: disabled for MCP compatibility)
+    let enable_ansi = env::var("WRAP_MCP_LOG_COLORS")
+        .map(|v| v.to_lowercase() == "true" || v == "1")
+        .unwrap_or(false);
+    
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
         .with_thread_ids(true)
         .with_line_number(true)
         .with_file(true)
+        .with_ansi(enable_ansi)  // Control ANSI colors via env var
         .with_writer(std::io::stderr);
 
     tracing_subscriber::registry()
