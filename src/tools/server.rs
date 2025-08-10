@@ -108,7 +108,18 @@ impl WrapServer {
         *self.disable_colors.write().await = !preserve_ansi;
 
         // Pass !preserve_ansi to disable colors (we want to disable colors by default)
-        let mut wrappee_client = WrappeeClient::spawn(&command, &wrappee_args, !preserve_ansi)?;
+        let mut wrappee_client = match WrappeeClient::spawn(&command, &wrappee_args, !preserve_ansi)
+        {
+            Ok(client) => client,
+            Err(e) => {
+                // If not in watch mode, panic on failure to start wrappee
+                if !watch_binary {
+                    panic!("Failed to spawn wrappee process '{command}': {e}");
+                }
+                // In watch mode, just return the error normally
+                return Err(e);
+            }
+        };
 
         // Initialize the wrappee
         wrappee_client.initialize().await?;
@@ -152,19 +163,30 @@ impl WrapServer {
             tracing::info!("Starting file watch for: {binary_path}");
 
             // Channel for file change events
-            let (tx, mut rx) = mpsc::channel(100);
+            let (tx, mut rx) = mpsc::channel::<EventKind>(100);
 
             // Create watcher with custom handler
             let mut watcher = RecommendedWatcher::new(
                 move |res: Result<Event, notify::Error>| {
                     if let Ok(event) = res {
-                        // Check if it's a modify or create event
-                        if matches!(
-                            event.kind,
-                            EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
-                        ) {
-                            // Send notification through channel
-                            let _ = tx.blocking_send(());
+                        // Send event kind through channel
+                        match event.kind {
+                            EventKind::Modify(_) => {
+                                let _ = tx.blocking_send(EventKind::Modify(
+                                    notify::event::ModifyKind::Any,
+                                ));
+                            }
+                            EventKind::Create(_) => {
+                                let _ = tx.blocking_send(EventKind::Create(
+                                    notify::event::CreateKind::Any,
+                                ));
+                            }
+                            EventKind::Remove(_) => {
+                                let _ = tx.blocking_send(EventKind::Remove(
+                                    notify::event::RemoveKind::Any,
+                                ));
+                            }
+                            _ => {}
                         }
                     }
                 },
@@ -188,38 +210,44 @@ impl WrapServer {
 
             // Spawn debounced restart handler
             let server = self.clone();
+            let binary_path_clone = binary_path.clone();
             tokio::spawn(async move {
                 let mut last_event = Instant::now();
                 let mut pending_restart = false;
+                let mut file_deleted = false;
 
                 loop {
                     tokio::select! {
-                        Some(_) = rx.recv() => {
-                            tracing::debug!("File change detected for binary");
-                            last_event = Instant::now();
-                            pending_restart = true;
+                        Some(event_kind) = rx.recv() => {
+                            match event_kind {
+                                EventKind::Remove(_) => {
+                                    tracing::info!("Binary file removed, waiting for recreation");
+                                    file_deleted = true;
+                                    pending_restart = false;  // Cancel any pending restart
+                                }
+                                EventKind::Create(_) if file_deleted => {
+                                    tracing::info!("Binary file recreated, scheduling restart");
+                                    file_deleted = false;
+                                    last_event = Instant::now();
+                                    pending_restart = true;
+                                }
+                                EventKind::Modify(_) if !file_deleted => {
+                                    tracing::debug!("Binary file modified, scheduling restart");
+                                    last_event = Instant::now();
+                                    pending_restart = true;
+                                }
+                                _ => {}
+                            }
                         }
                         _ = tokio::time::sleep(Duration::from_millis(100)) => {
                             // Check if we should restart (2 second debounce)
                             if pending_restart && last_event.elapsed() > Duration::from_secs(2) {
-                                tracing::info!("Binary file changed, triggering restart after debounce");
+                                // Check if file exists before attempting restart
+                                if std::path::Path::new(&binary_path_clone).exists() {
+                                    tracing::info!("Binary file change detected, triggering restart after debounce");
 
-                                // Get PID before restart
-                                let old_pid = {
-                                    let wrappee_guard = server.wrappee.read().await;
-                                    if let Some(wrappee) = wrappee_guard.as_ref() {
-                                        wrappee.get_pid().await
-                                    } else {
-                                        None
-                                    }
-                                };
-
-                                // Perform restart
-                                if let Err(e) = server.restart_wrapped_server().await {
-                                    tracing::error!("Failed to restart wrapped server: {e:?}");
-                                } else {
-                                    // Get new PID after restart
-                                    let new_pid = {
+                                    // Get PID before restart
+                                    let old_pid = {
                                         let wrappee_guard = server.wrappee.read().await;
                                         if let Some(wrappee) = wrappee_guard.as_ref() {
                                             wrappee.get_pid().await
@@ -228,7 +256,24 @@ impl WrapServer {
                                         }
                                     };
 
-                                    tracing::info!("Automatic restart completed (PID: {old_pid:?} -> {new_pid:?})");
+                                    // Perform restart
+                                    if let Err(e) = server.restart_wrapped_server().await {
+                                        tracing::error!("Failed to restart wrapped server: {e:?}");
+                                    } else {
+                                        // Get new PID after restart
+                                        let new_pid = {
+                                            let wrappee_guard = server.wrappee.read().await;
+                                            if let Some(wrappee) = wrappee_guard.as_ref() {
+                                                wrappee.get_pid().await
+                                            } else {
+                                                None
+                                            }
+                                        };
+
+                                        tracing::info!("Automatic restart completed (PID: {old_pid:?} -> {new_pid:?})");
+                                    }
+                                } else {
+                                    tracing::warn!("Binary file does not exist, skipping restart");
                                 }
 
                                 pending_restart = false;
