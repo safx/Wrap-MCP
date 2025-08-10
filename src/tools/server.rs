@@ -52,7 +52,7 @@ impl WrapServer {
         args: &[String],
         disable_colors: bool,
     ) -> Result<WrappeeClient> {
-        tracing::info!("Starting wrappee process: {} {:?}", command, args);
+        tracing::info!("Starting wrappee process: {command} {args:?}");
 
         // Spawn the wrappee process
         let mut wrappee_client = WrappeeClient::spawn(command, args, disable_colors)?;
@@ -84,6 +84,45 @@ impl WrapServer {
                 tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
         });
+    }
+
+    /// Get PID of current wrappee process
+    async fn get_wrappee_pid(&self) -> Option<u32> {
+        let wrappee_guard = self.wrappee.read().await;
+        if let Some(wrappee) = wrappee_guard.as_ref() {
+            wrappee.get_pid().await
+        } else {
+            None
+        }
+    }
+
+    /// Send tool list changed notification if peer is available
+    async fn notify_tools_changed(&self) {
+        if let Some(peer) = self.peer.read().await.as_ref() {
+            tracing::info!("Sending tools/list_changed notification to client");
+            if let Err(e) = peer.notify_tool_list_changed().await {
+                tracing::warn!("Failed to send tool list changed notification: {e}");
+            }
+        } else {
+            tracing::info!("No peer available for tool list changed notification");
+        }
+    }
+
+    /// Get stored command and arguments
+    async fn get_command_and_args(&self) -> (Option<String>, Option<Vec<String>>, bool) {
+        let command = self.wrappee_command.read().await.clone();
+        let args = self.wrappee_args.read().await.clone();
+        let disable_colors = *self.disable_colors.read().await;
+        (command, args, disable_colors)
+    }
+
+    /// Convert anyhow::Error to McpError for tool call responses
+    fn error_to_mcp(e: impl std::fmt::Display, message: &str) -> McpError {
+        McpError {
+            code: ErrorCode::INTERNAL_ERROR,
+            message: format!("{message}: {e}").into(),
+            data: None,
+        }
     }
 
     pub async fn initialize_wrappee(&self) -> Result<()> {
@@ -297,28 +336,14 @@ impl WrapServer {
                                         tracing::info!("Binary file change detected, triggering restart after debounce");
 
                                         // Get PID before restart
-                                        let old_pid = {
-                                            let wrappee_guard = server.wrappee.read().await;
-                                            if let Some(wrappee) = wrappee_guard.as_ref() {
-                                                wrappee.get_pid().await
-                                            } else {
-                                                None
-                                            }
-                                        };
+                                        let old_pid = server.get_wrappee_pid().await;
 
                                         // Perform restart
                                         if let Err(e) = server.restart_wrapped_server().await {
                                             tracing::error!("Failed to restart wrapped server: {e:?}");
                                         } else {
                                             // Get new PID after restart
-                                            let new_pid = {
-                                                let wrappee_guard = server.wrappee.read().await;
-                                                if let Some(wrappee) = wrappee_guard.as_ref() {
-                                                    wrappee.get_pid().await
-                                                } else {
-                                                    None
-                                                }
-                                            };
+                                            let new_pid = server.get_wrappee_pid().await;
                                             tracing::info!("Automatic restart completed (PID: {old_pid:?} -> {new_pid:?})");
                                         }
                                     } else {
@@ -326,9 +351,7 @@ impl WrapServer {
                                         tracing::info!("Binary file now exists, performing initial start");
 
                                         // Get stored command and args
-                                        let command = server.wrappee_command.read().await.clone();
-                                        let args = server.wrappee_args.read().await.clone();
-                                        let disable_colors = *server.disable_colors.read().await;
+                                        let (command, args, disable_colors) = server.get_command_and_args().await;
 
                                         if let (Some(cmd), Some(args)) = (command, args) {
                                             // Start the wrappee
@@ -338,24 +361,11 @@ impl WrapServer {
                                                     server.start_stderr_monitoring();
 
                                                     // Get PID of newly started process
-                                                    let new_pid = {
-                                                        let wrappee_guard = server.wrappee.read().await;
-                                                        if let Some(wrappee) = wrappee_guard.as_ref() {
-                                                            wrappee.get_pid().await
-                                                        } else {
-                                                            None
-                                                        }
-                                                    };
+                                                    let new_pid = server.get_wrappee_pid().await;
                                                     tracing::info!("Initial start completed (PID: {new_pid:?})");
 
                                                     // Send notification if peer is available
-                                                    if let Some(peer) = server.peer.read().await.as_ref() {
-                                                        if let Err(e) = peer.notify_tool_list_changed().await {
-                                                            tracing::warn!("Failed to send tool list changed notification: {e}");
-                                                        }
-                                                    } else {
-                                                        tracing::info!("No peer available for tool list changed notification");
-                                                    }
+                                                    server.notify_tools_changed().await;
                                                 }
                                                 Err(e) => {
                                                     tracing::error!("Failed to start wrapped server: {e}");
@@ -386,9 +396,7 @@ impl WrapServer {
         tracing::info!("Restarting wrapped server");
 
         // Get stored command and args
-        let command = self.wrappee_command.read().await.clone();
-        let args = self.wrappee_args.read().await.clone();
-        let disable_colors = *self.disable_colors.read().await;
+        let (command, args, disable_colors) = self.get_command_and_args().await;
 
         let (command, args) = match (command, args) {
             (Some(cmd), Some(args)) => (cmd, args),
@@ -422,24 +430,13 @@ impl WrapServer {
         let wrappee_client = self
             .start_wrappee_internal(&command, &args, disable_colors)
             .await
-            .map_err(|e| McpError {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: format!("Failed to restart wrapped server: {e}").into(),
-                data: None,
-            })?;
+            .map_err(|e| Self::error_to_mcp(e, "Failed to restart wrapped server"))?;
 
         // Store the new wrappee client
         *self.wrappee.write().await = Some(wrappee_client);
 
         // Send tool list changed notification if peer is available
-        if let Some(peer) = self.peer.read().await.as_ref() {
-            tracing::info!("Sending tools/list_changed notification to client");
-            if let Err(e) = peer.notify_tool_list_changed().await {
-                tracing::warn!("Failed to send tool list changed notification: {e}");
-            }
-        } else {
-            tracing::info!("No peer available for tool list changed notification");
-        }
+        self.notify_tools_changed().await;
 
         // Restart stderr monitoring
         self.start_stderr_monitoring();
@@ -494,7 +491,7 @@ impl WrapServer {
 impl ServerHandler for WrapServer {
     fn get_info(&self) -> ServerInfo {
         ServerInfo {
-            protocol_version: ProtocolVersion::V_2024_11_05,
+            protocol_version: ProtocolVersion::V_2025_03_26,
             capabilities: ServerCapabilities::builder()
                 .enable_tools()
                 .enable_tool_list_changed()
