@@ -10,20 +10,69 @@ async fn main() -> Result<()> {
     tracing::info!("Starting Wrap MCP Server");
 
     let transport = env::var("WRAP_MCP_TRANSPORT").unwrap_or_else(|_| "stdio".to_string());
+    
+    // Create a shared server instance for signal handling
+    let server = WrapServer::new();
+    let server_for_signal = server.clone();
+    
+    // Setup signal handlers
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        
+        tokio::spawn(async move {
+            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+            let mut sigint = signal(SignalKind::interrupt()).expect("Failed to listen for SIGINT");
+            
+            tokio::select! {
+                _ = sigterm.recv() => {
+                    tracing::info!("Received SIGTERM");
+                    server_for_signal.shutdown().await;
+                    // Give some time for graceful shutdown
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    std::process::exit(0);
+                }
+                _ = sigint.recv() => {
+                    tracing::info!("Received SIGINT");
+                    server_for_signal.shutdown().await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    std::process::exit(0);
+                }
+            }
+        });
+    }
+    
+    #[cfg(not(unix))]
+    {
+        let server_for_signal = server.clone();
+        tokio::spawn(async move {
+            match tokio::signal::ctrl_c().await {
+                Ok(()) => {
+                    tracing::info!("Received Ctrl+C");
+                    server_for_signal.shutdown().await;
+                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    std::process::exit(0);
+                }
+                Err(err) => {
+                    tracing::error!("Unable to listen for shutdown signal: {}", err);
+                }
+            }
+        });
+    }
 
-    let service_factory = || {
+    let service_factory = move || {
         tracing::info!("Creating service instance");
-        let server = WrapServer::new();
+        let server_clone = server.clone();
 
         // Initialize wrappee in the background
-        let server_clone = server.clone();
+        let server_init = server.clone();
         tokio::spawn(async move {
-            if let Err(e) = server_clone.initialize_wrappee().await {
+            if let Err(e) = server_init.initialize_wrappee().await {
                 tracing::error!("Failed to initialize wrappee: {e}");
             }
         });
 
-        Ok(server)
+        Ok(server_clone)
     };
 
     match transport.as_str() {

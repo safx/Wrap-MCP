@@ -11,6 +11,7 @@ use rmcp::{
 use serde_json::Value;
 use std::path::Path;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::{RwLock, mpsc};
 use tokio::time::{Duration, Instant};
 
@@ -22,6 +23,7 @@ pub struct WrapServer {
     wrappee_args: Arc<RwLock<Option<Vec<String>>>>,
     disable_colors: Arc<RwLock<bool>>,
     peer: Arc<RwLock<Option<Peer<RoleServer>>>>,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl Default for WrapServer {
@@ -42,6 +44,22 @@ impl WrapServer {
             wrappee_args: Arc::new(RwLock::new(None)),
             disable_colors: Arc::new(RwLock::new(false)),
             peer: Arc::new(RwLock::new(None)),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+        }
+    }
+    
+    /// Initiate graceful shutdown
+    pub async fn shutdown(&self) {
+        tracing::info!("Initiating graceful shutdown");
+        self.shutting_down.store(true, Ordering::SeqCst);
+        
+        // Shutdown wrappee
+        let mut wrappee_guard = self.wrappee.write().await;
+        if let Some(client) = wrappee_guard.take() {
+            tracing::info!("Shutting down wrappee process");
+            if let Err(e) = client.shutdown().await {
+                tracing::warn!("Error shutting down wrappee: {}", e);
+            }
         }
     }
 

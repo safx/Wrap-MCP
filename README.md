@@ -161,6 +161,19 @@ cargo fmt
 cargo clippy
 ```
 
+## Known Limitations
+
+### Claude Code Reconnect Issue
+
+When using Wrap-MCP with Claude Code, the reconnect functionality may fail on the first attempt. This occurs because Claude Code doesn't wait for the previous process to fully terminate before starting a new one.
+
+- **stdio transport**: Process doesn't release file handles immediately
+- **HTTP transport**: Port remains in TIME_WAIT state after process termination
+
+**Workaround**: Execute the reconnect command twice. The second attempt usually succeeds.
+
+This is a limitation of Claude Code's reconnect implementation and cannot be fully resolved from the Wrap-MCP side.
+
 ## License
 
 MIT
