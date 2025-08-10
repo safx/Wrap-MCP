@@ -149,28 +149,29 @@ impl WrapServer {
         *self.disable_colors.write().await = !preserve_ansi;
 
         // Start the wrappee using the common method
-        let wrappee_client = match self
+        let wrappee_result = self
             .start_wrappee_internal(&command, &wrappee_args, !preserve_ansi)
-            .await
-        {
-            Ok(client) => client,
+            .await;
+
+        match wrappee_result {
+            Ok(wrappee_client) => {
+                // Store the wrappee client
+                *self.wrappee.write().await = Some(wrappee_client);
+
+                // Start stderr monitoring in the background
+                self.start_stderr_monitoring();
+            }
             Err(e) => {
                 // If not in watch mode, panic on failure to start wrappee
                 if !watch_binary {
                     panic!("Failed to spawn wrappee process '{command}': {e}");
                 }
-                // In watch mode, just return the error normally
-                return Err(e);
+                // In watch mode, log the error but continue to set up file watching
+                tracing::warn!("Failed to start wrappee (will wait for file creation): {e}");
             }
-        };
+        }
 
-        // Store the wrappee client
-        *self.wrappee.write().await = Some(wrappee_client);
-
-        // Start stderr monitoring in the background
-        self.start_stderr_monitoring();
-
-        // Start file watching if enabled
+        // Start file watching if enabled (even if wrappee failed to start)
         if watch_binary {
             self.start_file_watching().await?;
         }
@@ -219,12 +220,26 @@ impl WrapServer {
                 panic!("Failed to create file watcher: {e}");
             })?;
 
-            // Watch the binary file
+            // Determine what to watch
+            let path_to_watch = Path::new(&binary_path);
+            let (watch_path, watching_parent) = if path_to_watch.exists() {
+                // File exists, watch it directly
+                (path_to_watch.to_path_buf(), false)
+            } else {
+                // File doesn't exist, watch parent directory
+                let parent = path_to_watch.parent().unwrap_or(Path::new("."));
+                tracing::info!(
+                    "Binary file doesn't exist, watching parent directory: {}",
+                    parent.display()
+                );
+                (parent.to_path_buf(), true)
+            };
+
+            // Start watching
             watcher
-                .watch(Path::new(&binary_path), RecursiveMode::NonRecursive)
+                .watch(&watch_path, RecursiveMode::NonRecursive)
                 .map_err(|e| {
-                    // Panic on watch failure
-                    panic!("Failed to watch binary file {binary_path}: {e}");
+                    panic!("Failed to watch path {}: {e}", watch_path.display());
                 })?;
 
             // Keep watcher alive by storing it
@@ -237,6 +252,7 @@ impl WrapServer {
                 let mut last_event = Instant::now();
                 let mut pending_restart = false;
                 let mut file_deleted = false;
+                let mut initial_start_needed = watching_parent; // Need initial start if watching parent
 
                 loop {
                     tokio::select! {
@@ -247,13 +263,21 @@ impl WrapServer {
                                     file_deleted = true;
                                     pending_restart = false;  // Cancel any pending restart
                                 }
-                                EventKind::Create(_) if file_deleted => {
-                                    tracing::info!("Binary file recreated, scheduling restart");
-                                    file_deleted = false;
-                                    last_event = Instant::now();
-                                    pending_restart = true;
+                                EventKind::Create(_) if file_deleted || initial_start_needed => {
+                                    // Check if the created file is our binary
+                                    if std::path::Path::new(&binary_path_clone).exists() {
+                                        if initial_start_needed {
+                                            tracing::info!("Binary file created for the first time, scheduling initial start");
+                                            initial_start_needed = false;
+                                        } else {
+                                            tracing::info!("Binary file recreated, scheduling restart");
+                                        }
+                                        file_deleted = false;
+                                        last_event = Instant::now();
+                                        pending_restart = true;
+                                    }
                                 }
-                                EventKind::Modify(_) if !file_deleted => {
+                                EventKind::Modify(_) if !file_deleted && !initial_start_needed => {
                                     tracing::debug!("Binary file modified, scheduling restart");
                                     last_event = Instant::now();
                                     pending_restart = true;
@@ -266,24 +290,14 @@ impl WrapServer {
                             if pending_restart && last_event.elapsed() > Duration::from_secs(2) {
                                 // Check if file exists before attempting restart
                                 if std::path::Path::new(&binary_path_clone).exists() {
-                                    tracing::info!("Binary file change detected, triggering restart after debounce");
+                                    // Check if this is an initial start or a restart
+                                    let has_existing_wrappee = server.wrappee.read().await.is_some();
 
-                                    // Get PID before restart
-                                    let old_pid = {
-                                        let wrappee_guard = server.wrappee.read().await;
-                                        if let Some(wrappee) = wrappee_guard.as_ref() {
-                                            wrappee.get_pid().await
-                                        } else {
-                                            None
-                                        }
-                                    };
+                                    if has_existing_wrappee {
+                                        tracing::info!("Binary file change detected, triggering restart after debounce");
 
-                                    // Perform restart
-                                    if let Err(e) = server.restart_wrapped_server().await {
-                                        tracing::error!("Failed to restart wrapped server: {e:?}");
-                                    } else {
-                                        // Get new PID after restart
-                                        let new_pid = {
+                                        // Get PID before restart
+                                        let old_pid = {
                                             let wrappee_guard = server.wrappee.read().await;
                                             if let Some(wrappee) = wrappee_guard.as_ref() {
                                                 wrappee.get_pid().await
@@ -292,7 +306,62 @@ impl WrapServer {
                                             }
                                         };
 
-                                        tracing::info!("Automatic restart completed (PID: {old_pid:?} -> {new_pid:?})");
+                                        // Perform restart
+                                        if let Err(e) = server.restart_wrapped_server().await {
+                                            tracing::error!("Failed to restart wrapped server: {e:?}");
+                                        } else {
+                                            // Get new PID after restart
+                                            let new_pid = {
+                                                let wrappee_guard = server.wrappee.read().await;
+                                                if let Some(wrappee) = wrappee_guard.as_ref() {
+                                                    wrappee.get_pid().await
+                                                } else {
+                                                    None
+                                                }
+                                            };
+                                            tracing::info!("Automatic restart completed (PID: {old_pid:?} -> {new_pid:?})");
+                                        }
+                                    } else {
+                                        // Initial start - no existing wrappee to shut down
+                                        tracing::info!("Binary file now exists, performing initial start");
+
+                                        // Get stored command and args
+                                        let command = server.wrappee_command.read().await.clone();
+                                        let args = server.wrappee_args.read().await.clone();
+                                        let disable_colors = *server.disable_colors.read().await;
+
+                                        if let (Some(cmd), Some(args)) = (command, args) {
+                                            // Start the wrappee
+                                            match server.start_wrappee_internal(&cmd, &args, disable_colors).await {
+                                                Ok(wrappee_client) => {
+                                                    *server.wrappee.write().await = Some(wrappee_client);
+                                                    server.start_stderr_monitoring();
+
+                                                    // Get PID of newly started process
+                                                    let new_pid = {
+                                                        let wrappee_guard = server.wrappee.read().await;
+                                                        if let Some(wrappee) = wrappee_guard.as_ref() {
+                                                            wrappee.get_pid().await
+                                                        } else {
+                                                            None
+                                                        }
+                                                    };
+                                                    tracing::info!("Initial start completed (PID: {new_pid:?})");
+
+                                                    // Send notification if peer is available
+                                                    if let Some(peer) = server.peer.read().await.as_ref() {
+                                                        if let Err(e) = peer.notify_tool_list_changed().await {
+                                                            tracing::warn!("Failed to send tool list changed notification: {e}");
+                                                        }
+                                                    } else {
+                                                        tracing::info!("No peer available for tool list changed notification");
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    tracing::error!("Failed to start wrapped server: {e}");
+                                                }
+                                            }
+                                        }
                                     }
                                 } else {
                                     tracing::warn!("Binary file does not exist, skipping restart");
