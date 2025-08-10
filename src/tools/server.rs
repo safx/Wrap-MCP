@@ -45,6 +45,47 @@ impl WrapServer {
         }
     }
 
+    /// Internal method to start a wrappee process with common initialization logic
+    async fn start_wrappee_internal(
+        &self,
+        command: &str,
+        args: &[String],
+        disable_colors: bool,
+    ) -> Result<WrappeeClient> {
+        tracing::info!("Starting wrappee process: {} {:?}", command, args);
+
+        // Spawn the wrappee process
+        let mut wrappee_client = WrappeeClient::spawn(command, args, disable_colors)?;
+
+        // Initialize the wrappee
+        wrappee_client.initialize().await?;
+
+        // Discover tools from wrappee
+        self.proxy_handler
+            .discover_tools(&mut wrappee_client)
+            .await?;
+
+        Ok(wrappee_client)
+    }
+
+    /// Start stderr monitoring for the wrappee
+    fn start_stderr_monitoring(&self) {
+        let wrappee_clone = self.wrappee.clone();
+        let log_storage = self.proxy_handler.log_storage.clone();
+        tokio::spawn(async move {
+            loop {
+                let mut wrappee_guard = wrappee_clone.write().await;
+                if let Some(wrappee) = wrappee_guard.as_mut()
+                    && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await
+                {
+                    log_storage.add_stderr(stderr_msg).await;
+                }
+                drop(wrappee_guard);
+                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+            }
+        });
+    }
+
     pub async fn initialize_wrappee(&self) -> Result<()> {
         // Parse command line arguments
         let args: Vec<String> = std::env::args().collect();
@@ -107,8 +148,10 @@ impl WrapServer {
         *self.wrappee_args.write().await = Some(wrappee_args.clone());
         *self.disable_colors.write().await = !preserve_ansi;
 
-        // Pass !preserve_ansi to disable colors (we want to disable colors by default)
-        let mut wrappee_client = match WrappeeClient::spawn(&command, &wrappee_args, !preserve_ansi)
+        // Start the wrappee using the common method
+        let wrappee_client = match self
+            .start_wrappee_internal(&command, &wrappee_args, !preserve_ansi)
+            .await
         {
             Ok(client) => client,
             Err(e) => {
@@ -121,32 +164,11 @@ impl WrapServer {
             }
         };
 
-        // Initialize the wrappee
-        wrappee_client.initialize().await?;
-
-        // Discover tools from wrappee
-        self.proxy_handler
-            .discover_tools(&mut wrappee_client)
-            .await?;
-
         // Store the wrappee client
         *self.wrappee.write().await = Some(wrappee_client);
 
         // Start stderr monitoring in the background
-        let wrappee_clone = self.wrappee.clone();
-        let log_storage = self.proxy_handler.log_storage.clone();
-        tokio::spawn(async move {
-            loop {
-                let mut wrappee_guard = wrappee_clone.write().await;
-                if let Some(wrappee) = wrappee_guard.as_mut()
-                    && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await
-                {
-                    log_storage.add_stderr(stderr_msg).await;
-                }
-                drop(wrappee_guard);
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-        });
+        self.start_stderr_monitoring();
 
         // Start file watching if enabled
         if watch_binary {
@@ -324,30 +346,16 @@ impl WrapServer {
         // Wait a bit for clean shutdown
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
-        // Start new wrappee
-        tracing::info!("Starting new wrapped server: {command} {args:?}");
-        let mut wrappee_client =
-            WrappeeClient::spawn(&command, &args, disable_colors).map_err(|e| McpError {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: format!("Failed to spawn wrapped server: {e}").into(),
-                data: None,
-            })?;
-
-        // Initialize the wrappee
-        wrappee_client.initialize().await.map_err(|e| McpError {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: format!("Failed to initialize wrapped server: {e}").into(),
-            data: None,
-        })?;
-
-        // Clear and rediscover tools from wrappee
+        // Clear tools before restarting
         self.proxy_handler.clear_tools().await;
-        self.proxy_handler
-            .discover_tools(&mut wrappee_client)
+
+        // Start new wrappee using the common method
+        let wrappee_client = self
+            .start_wrappee_internal(&command, &args, disable_colors)
             .await
             .map_err(|e| McpError {
                 code: ErrorCode::INTERNAL_ERROR,
-                message: format!("Failed to discover tools: {e}").into(),
+                message: format!("Failed to restart wrapped server: {e}").into(),
                 data: None,
             })?;
 
@@ -365,20 +373,7 @@ impl WrapServer {
         }
 
         // Restart stderr monitoring
-        let wrappee_clone = self.wrappee.clone();
-        let log_storage = self.proxy_handler.log_storage.clone();
-        tokio::spawn(async move {
-            loop {
-                let mut wrappee_guard = wrappee_clone.write().await;
-                if let Some(wrappee) = wrappee_guard.as_mut()
-                    && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await
-                {
-                    log_storage.add_stderr(stderr_msg).await;
-                }
-                drop(wrappee_guard);
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-            }
-        });
+        self.start_stderr_monitoring();
 
         tracing::info!("Wrapped server restarted successfully");
         Ok(CallToolResult::success(vec![Content::text(
