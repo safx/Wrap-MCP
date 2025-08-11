@@ -22,6 +22,7 @@ tokio = { version = "1", features = [
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
+thiserror = "2.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = [
     "env-filter",
@@ -34,3 +35,6 @@ notify = { version = "6.1", default-features = false, features = ["macos_fsevent
 # Required for streamable HTTP transport (minimal features)
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "http2"] }
 schemars = { version = "1.0" }
+
+[dev-dependencies]
+serial_test = "3.1"

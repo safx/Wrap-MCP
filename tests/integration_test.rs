@@ -6,7 +6,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_storage() {
-        let storage = LogStorage::new();
+        // Use test-specific constructor to avoid needing Config::global()
+        let storage = LogStorage::new_with_max_entries(1000);
 
         // Add some logs
         let req_id = storage
@@ -50,10 +51,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_log_size_limit() {
-        unsafe {
-            std::env::set_var("WRAP_MCP_LOGSIZE", "5");
-        }
-        let storage = LogStorage::new();
+        // Use test-specific constructor instead of setting environment variables
+        let storage = LogStorage::new_with_max_entries(5);
 
         // Add more logs than the limit
         for i in 0..10 {
@@ -65,16 +64,12 @@ mod tests {
         // Should only keep the last 5
         let count = storage.get_log_count().await;
         assert_eq!(count, 5);
-
-        // Clean up
-        unsafe {
-            std::env::remove_var("WRAP_MCP_LOGSIZE");
-        }
     }
 
     #[test]
     fn test_proxy_handler_creation() {
-        let log_storage = Arc::new(LogStorage::new());
+        // Use test-specific constructor to avoid needing Config::global()
+        let log_storage = Arc::new(LogStorage::new_with_max_entries(1000));
         let proxy = ProxyHandler::new(log_storage.clone());
 
         // Proxy should be created successfully - proxy holds one reference

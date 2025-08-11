@@ -1,9 +1,9 @@
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::env;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+use crate::config::Config;
 use crate::logging::{LogEntry, LogFilter};
 
 #[derive(Debug, Clone)]
@@ -14,22 +14,19 @@ pub struct LogStorage {
     ansi_removal_enabled: Arc<RwLock<bool>>,
 }
 
-const DEFAULT_MAX_ENTRIES: usize = 1000;
-
 impl LogStorage {
     pub fn new() -> Self {
-        let max_entries = env::var("WRAP_MCP_LOGSIZE")
-            .ok()
-            .and_then(|s| s.parse().ok())
-            .unwrap_or(DEFAULT_MAX_ENTRIES);
-
-        tracing::info!("Log storage initialized with max entries: {max_entries}");
-
+        let config = Config::global();
+        let max_entries = config.log_size;
+        Self::new_with_max_entries(max_entries)
+    }
+    
+    pub fn new_with_max_entries(max_entries: usize) -> Self {
         Self {
             entries: Arc::new(RwLock::new(VecDeque::new())),
             next_id: Arc::new(RwLock::new(1)),
             max_entries,
-            ansi_removal_enabled: Arc::new(RwLock::new(true)), // Default to removing ANSI
+            ansi_removal_enabled: Arc::new(RwLock::new(true)),
         }
     }
 

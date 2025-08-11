@@ -6,6 +6,7 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task;
 use tokio::time::{Duration, timeout};
+use crate::config::Config;
 
 #[derive(Debug)]
 pub struct WrappeeClient {
@@ -87,11 +88,9 @@ impl WrappeeClient {
             tracing::debug!("Stderr reader finished");
         });
 
-        // Read timeout from environment variable, default to 30 seconds
-        let timeout_secs = std::env::var("WRAP_MCP_TOOL_TIMEOUT")
-            .ok()
-            .and_then(|s| s.parse::<u64>().ok())
-            .unwrap_or(30);
+        // Get timeout from config
+        let config = Config::global();
+        let timeout_secs = config.tool_timeout_secs;
 
         tracing::info!("Tool timeout set to {timeout_secs} seconds");
 
@@ -156,9 +155,9 @@ impl WrappeeClient {
     }
 
     pub async fn initialize(&mut self) -> Result<Value> {
-        // Get protocol version from environment variable or use default
-        let protocol_version =
-            std::env::var("WRAP_MCP_PROTOCOL_VERSION").unwrap_or_else(|_| "2025.03.26".to_string());
+        // Get protocol version from config
+        let config = Config::global();
+        let protocol_version = &config.protocol_version;
 
         tracing::info!("Initializing wrappee with protocol version: {protocol_version}",);
 

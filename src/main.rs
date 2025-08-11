@@ -1,15 +1,18 @@
 use anyhow::Result;
-use std::env;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-use wrap_mcp::{WrapServer, run};
+use wrap_mcp::{config::Config, WrapServer, run};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
+    // Initialize configuration first
+    Config::initialize()?;
+    let config = Config::global();
+    
+    init_tracing(config);
 
     tracing::info!("Starting Wrap MCP Server");
 
-    let transport = env::var("WRAP_MCP_TRANSPORT").unwrap_or_else(|_| "stdio".to_string());
+    let transport = &config.transport;
     
     // Create a shared server instance for signal handling
     let server = WrapServer::new();
@@ -85,13 +88,11 @@ async fn main() -> Result<()> {
     }
 }
 
-fn init_tracing() {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+fn init_tracing(config: &Config) {
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.rust_log));
 
-    // Check if ANSI colors should be disabled (default: disabled for MCP compatibility)
-    let enable_ansi = env::var("WRAP_MCP_LOG_COLORS")
-        .map(|v| v.to_lowercase() == "true" || v == "1")
-        .unwrap_or(false);
+    // Use ANSI colors from config
+    let enable_ansi = config.log_colors;
     
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
