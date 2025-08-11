@@ -20,7 +20,7 @@ impl LogStorage {
         let max_entries = config.log_size;
         Self::new_with_max_entries(max_entries)
     }
-    
+
     pub fn new_with_max_entries(max_entries: usize) -> Self {
         Self {
             entries: Arc::new(RwLock::new(VecDeque::new())),

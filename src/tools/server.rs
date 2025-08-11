@@ -47,12 +47,12 @@ impl WrapServer {
             shutting_down: Arc::new(AtomicBool::new(false)),
         }
     }
-    
+
     /// Initiate graceful shutdown
     pub async fn shutdown(&self) {
         tracing::info!("Initiating graceful shutdown");
         self.shutting_down.store(true, Ordering::SeqCst);
-        
+
         // Shutdown wrappee
         let mut wrappee_guard = self.wrappee.write().await;
         if let Some(client) = wrappee_guard.take() {
@@ -126,7 +126,6 @@ impl WrapServer {
         }
     }
 
-
     /// Convert anyhow::Error to McpError for tool call responses
     fn error_to_mcp(e: impl std::fmt::Display, message: &str) -> McpError {
         McpError {
@@ -172,11 +171,10 @@ impl WrapServer {
             Some(pos) if pos + 1 < args.len() => {
                 // Get the command and arguments after "--"
                 let command = args[pos + 1].clone();
-                let wrappee_args = if pos + 2 < args.len() {
-                    args[pos + 2..].to_vec()
-                } else {
-                    vec![]
-                };
+                let wrappee_args = args
+                    .get(pos + 2..)
+                    .map(|slice| slice.to_vec())
+                    .unwrap_or_default();
                 (command, wrappee_args)
             }
             _ => {
@@ -449,12 +447,13 @@ impl WrapServer {
             let command_guard = self.wrappee_command.read().await;
             let args_guard = self.wrappee_args.read().await;
             let disable_colors = *self.disable_colors.read().await;
-            
+
             // We checked above that both are Some
             let command = command_guard.as_ref().unwrap();
             let args = args_guard.as_ref().unwrap();
-            
-            self.start_wrappee_internal(command, args, disable_colors).await
+
+            self.start_wrappee_internal(command, args, disable_colors)
+                .await
         }
         .map_err(|e| Self::error_to_mcp(e, "Failed to restart wrapped server"))?;
 

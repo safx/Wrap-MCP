@@ -61,7 +61,7 @@ impl ProxyHandler {
 
     pub async fn get_all_tools(&self) -> Vec<Tool> {
         let wrappee_tools = self.wrappee_tools.read().await;
-        
+
         // Create a new vector with capacity for all tools
         let mut all_tools = Vec::with_capacity(wrappee_tools.len() + 2);
         all_tools.extend(wrappee_tools.iter().cloned());

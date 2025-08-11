@@ -1,32 +1,33 @@
 use anyhow::Result;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-use wrap_mcp::{config::Config, WrapServer, run};
+use wrap_mcp::{WrapServer, config::Config, run};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     // Initialize configuration first
     Config::initialize()?;
     let config = Config::global();
-    
+
     init_tracing(config);
 
     tracing::info!("Starting Wrap MCP Server");
 
     let transport = &config.transport;
-    
+
     // Create a shared server instance for signal handling
     let server = WrapServer::new();
     let server_for_signal = server.clone();
-    
+
     // Setup signal handlers
     #[cfg(unix)]
     {
-        use tokio::signal::unix::{signal, SignalKind};
-        
+        use tokio::signal::unix::{SignalKind, signal};
+
         tokio::spawn(async move {
-            let mut sigterm = signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
             let mut sigint = signal(SignalKind::interrupt()).expect("Failed to listen for SIGINT");
-            
+
             tokio::select! {
                 _ = sigterm.recv() => {
                     tracing::info!("Received SIGTERM");
@@ -44,7 +45,7 @@ async fn main() -> Result<()> {
             }
         });
     }
-    
+
     #[cfg(not(unix))]
     {
         let server_for_signal = server.clone();
@@ -89,17 +90,18 @@ async fn main() -> Result<()> {
 }
 
 fn init_tracing(config: &Config) {
-    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.rust_log));
+    let env_filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.rust_log));
 
     // Use ANSI colors from config
     let enable_ansi = config.log_colors;
-    
+
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)
         .with_thread_ids(true)
         .with_line_number(true)
         .with_file(true)
-        .with_ansi(enable_ansi)  // Control ANSI colors via env var
+        .with_ansi(enable_ansi) // Control ANSI colors via env var
         .with_writer(std::io::stderr);
 
     tracing_subscriber::registry()

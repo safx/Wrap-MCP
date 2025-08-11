@@ -1,3 +1,4 @@
+use crate::config::Config;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
@@ -6,7 +7,6 @@ use std::sync::Arc;
 use tokio::sync::{Mutex, mpsc};
 use tokio::task;
 use tokio::time::{Duration, timeout};
-use crate::config::Config;
 
 #[derive(Debug)]
 pub struct WrappeeClient {
