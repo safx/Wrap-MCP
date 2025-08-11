@@ -126,13 +126,6 @@ impl WrapServer {
         }
     }
 
-    /// Get stored command and arguments
-    async fn get_command_and_args(&self) -> (Option<String>, Option<Vec<String>>, bool) {
-        let command = self.wrappee_command.read().await.clone();
-        let args = self.wrappee_args.read().await.clone();
-        let disable_colors = *self.disable_colors.read().await;
-        (command, args, disable_colors)
-    }
 
     /// Convert anyhow::Error to McpError for tool call responses
     fn error_to_mcp(e: impl std::fmt::Display, message: &str) -> McpError {
@@ -237,9 +230,13 @@ impl WrapServer {
     }
 
     async fn start_file_watching(&self) -> Result<()> {
-        let command = self.wrappee_command.read().await.clone();
+        // Only clone if we actually have a command to watch
+        let binary_path = {
+            let command_guard = self.wrappee_command.read().await;
+            command_guard.as_ref().cloned()
+        };
 
-        if let Some(binary_path) = command {
+        if let Some(binary_path) = binary_path {
             tracing::info!("Starting file watch for: {binary_path}");
 
             // Channel for file change events
@@ -368,12 +365,14 @@ impl WrapServer {
                                         // Initial start - no existing wrappee to shut down
                                         tracing::info!("Binary file now exists, performing initial start");
 
-                                        // Get stored command and args
-                                        let (command, args, disable_colors) = server.get_command_and_args().await;
+                                        // Get stored command and args without cloning
+                                        let command_guard = server.wrappee_command.read().await;
+                                        let args_guard = server.wrappee_args.read().await;
+                                        let disable_colors = *server.disable_colors.read().await;
 
-                                        if let (Some(cmd), Some(args)) = (command, args) {
+                                        if let (Some(cmd), Some(args)) = (command_guard.as_ref(), args_guard.as_ref()) {
                                             // Start the wrappee
-                                            match server.start_wrappee_internal(&cmd, &args, disable_colors).await {
+                                            match server.start_wrappee_internal(cmd, args, disable_colors).await {
                                                 Ok(wrappee_client) => {
                                                     *server.wrappee.write().await = Some(wrappee_client);
                                                     server.start_stderr_monitoring();
@@ -413,19 +412,20 @@ impl WrapServer {
     pub async fn restart_wrapped_server(&self) -> Result<CallToolResult, McpError> {
         tracing::info!("Restarting wrapped server");
 
-        // Get stored command and args
-        let (command, args, disable_colors) = self.get_command_and_args().await;
-
-        let (command, args) = match (command, args) {
-            (Some(cmd), Some(args)) => (cmd, args),
-            _ => {
-                return Err(McpError {
-                    code: ErrorCode::INTERNAL_ERROR,
-                    message: "No wrapped server to restart".into(),
-                    data: None,
-                });
-            }
+        // Check if command and args are available
+        let has_config = {
+            let cmd_guard = self.wrappee_command.read().await;
+            let args_guard = self.wrappee_args.read().await;
+            cmd_guard.is_some() && args_guard.is_some()
         };
+
+        if !has_config {
+            return Err(McpError {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "No wrapped server to restart".into(),
+                data: None,
+            });
+        }
 
         // Shutdown existing wrappee
         {
@@ -444,11 +444,19 @@ impl WrapServer {
         // Clear tools before restarting
         self.proxy_handler.clear_tools().await;
 
-        // Start new wrappee using the common method
-        let wrappee_client = self
-            .start_wrappee_internal(&command, &args, disable_colors)
-            .await
-            .map_err(|e| Self::error_to_mcp(e, "Failed to restart wrapped server"))?;
+        // Start new wrappee using stored command and args
+        let wrappee_client = {
+            let command_guard = self.wrappee_command.read().await;
+            let args_guard = self.wrappee_args.read().await;
+            let disable_colors = *self.disable_colors.read().await;
+            
+            // We checked above that both are Some
+            let command = command_guard.as_ref().unwrap();
+            let args = args_guard.as_ref().unwrap();
+            
+            self.start_wrappee_internal(command, args, disable_colors).await
+        }
+        .map_err(|e| Self::error_to_mcp(e, "Failed to restart wrapped server"))?;
 
         // Store the new wrappee client
         *self.wrappee.write().await = Some(wrappee_client);

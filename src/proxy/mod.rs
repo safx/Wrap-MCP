@@ -61,12 +61,17 @@ impl ProxyHandler {
 
     pub async fn get_all_tools(&self) -> Vec<Tool> {
         let wrappee_tools = self.wrappee_tools.read().await;
-        let mut all_tools = wrappee_tools.clone();
+        
+        // Create a new vector with capacity for all tools
+        let mut all_tools = Vec::with_capacity(wrappee_tools.len() + 2);
+        all_tools.extend(wrappee_tools.iter().cloned());
 
         // Add show_log tool
-        let show_log_schema: Map<String, Value> = serde_json::json!({
-            "type": "object",
-            "properties": {
+        let mut show_log_schema = Map::new();
+        show_log_schema.insert("type".into(), "object".into());
+        show_log_schema.insert(
+            "properties".into(),
+            serde_json::json!({
                 "limit": {
                     "type": "integer",
                     "description": "Maximum number of log entries to show (default: 20)",
@@ -91,11 +96,8 @@ impl ProxyHandler {
                     "description": "Output format (default: ai)",
                     "default": "ai"
                 }
-            }
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+            }),
+        );
 
         all_tools.push(Tool {
             name: "show_log".into(),
@@ -106,13 +108,9 @@ impl ProxyHandler {
         });
 
         // Add clear_log tool
-        let clear_log_schema: Map<String, Value> = serde_json::json!({
-            "type": "object",
-            "properties": {}
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        let mut clear_log_schema = Map::new();
+        clear_log_schema.insert("type".into(), "object".into());
+        clear_log_schema.insert("properties".into(), serde_json::json!({}));
 
         all_tools.push(Tool {
             name: "clear_log".into(),
@@ -123,13 +121,9 @@ impl ProxyHandler {
         });
 
         // Add restart_wrapped_server tool
-        let restart_schema: Map<String, Value> = serde_json::json!({
-            "type": "object",
-            "properties": {}
-        })
-        .as_object()
-        .unwrap()
-        .clone();
+        let mut restart_schema = Map::new();
+        restart_schema.insert("type".into(), "object".into());
+        restart_schema.insert("properties".into(), serde_json::json!({}));
 
         all_tools.push(Tool {
             name: "restart_wrapped_server".into(),
