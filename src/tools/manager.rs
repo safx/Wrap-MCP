@@ -4,6 +4,7 @@ use anyhow::Result;
 use rmcp::{ErrorData as McpError, model::*};
 use serde_json::Map;
 use serde_json::Value;
+use std::borrow::Cow;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
@@ -152,69 +153,65 @@ impl ToolManager {
 // Tool creation functions
 
 fn create_show_log_tool() -> Tool {
-    let mut schema = Map::new();
-    schema.insert("type".into(), "object".into());
-    schema.insert(
-        "properties".into(),
+    create_tool(
+        Cow::Borrowed("show_log"),
+        Cow::Borrowed("Display recorded request/response logs from the wrapper"),
         serde_json::json!({
-            "limit": {
-                "type": "integer",
-                "description": "Maximum number of log entries to show (default: 20)",
-                "default": 20
-            },
-            "tool_name": {
-                "type": "string",
-                "description": "Filter logs by tool name"
-            },
-            "entry_type": {
-                "type": "string",
-                "enum": ["request", "response", "error", "stderr"],
-                "description": "Filter logs by entry type"
-            },
-            "keyword": {
-                "type": "string",
-                "description": "Regular expression pattern to search in log content (fallback to literal search if invalid regex)"
-            },
-            "format": {
-                "type": "string",
-                "enum": ["ai", "text", "json"],
-                "description": "Output format (default: ai)",
-                "default": "ai"
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of log entries to show (default: 20)",
+                    "default": 20
+                },
+                "tool_name": {
+                    "type": "string",
+                    "description": "Filter logs by tool name"
+                },
+                "entry_type": {
+                    "type": "string",
+                    "enum": ["request", "response", "error", "stderr"],
+                    "description": "Filter logs by entry type"
+                },
+                "keyword": {
+                    "type": "string",
+                    "description": "Regular expression pattern to search in log content (fallback to literal search if invalid regex)"
+                },
+                "format": {
+                    "type": "string",
+                    "enum": ["ai", "text", "json"],
+                    "description": "Output format (default: ai)",
+                    "default": "ai"
+                }
             }
         }),
-    );
-
-    Tool {
-        name: "show_log".into(),
-        description: Some("Display recorded request/response logs from the wrapper".into()),
-        input_schema: Arc::new(schema),
-        output_schema: None,
-        annotations: None,
-    }
+    )
 }
 
 fn create_clear_log_tool() -> Tool {
-    let mut schema = Map::new();
-    schema.insert("type".into(), "object".into());
-    schema.insert("properties".into(), serde_json::json!({}));
-
-    Tool {
-        name: "clear_log".into(),
-        description: Some("Clear all recorded logs".into()),
-        input_schema: Arc::new(schema),
-        output_schema: None,
-        annotations: None,
-    }
+    create_tool(
+        Cow::Borrowed("clear_log"),
+        Cow::Borrowed("Clear all recorded logs"),
+        serde_json::json!({}),
+    )
 }
 
 fn create_restart_wrapped_server_tool() -> Tool {
+    create_tool(
+        Cow::Borrowed("restart_wrapped_server"),
+        Cow::Borrowed("Restart the wrapped MCP server while preserving logs"),
+        serde_json::json!({}),
+    )
+}
+
+fn create_tool(name: Cow<'static, str>, description: Cow<'static, str>, properties: Value) -> Tool {
     let mut schema = Map::new();
     schema.insert("type".into(), "object".into());
-    schema.insert("properties".into(), serde_json::json!({}));
+    schema.insert("properties".into(), properties);
 
     Tool {
-        name: "restart_wrapped_server".into(),
-        description: Some("Restart the wrapped MCP server while preserving logs".into()),
+        name,
+        description: Some(description),
         input_schema: Arc::new(schema),
         output_schema: None,
         annotations: None,
