@@ -2,10 +2,9 @@ use crate::logging::LogStorage;
 use crate::wrappee::WrappeeClient;
 use anyhow::Result;
 use rmcp::{ErrorData as McpError, model::*};
-use serde_json::Map;
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::borrow::Cow;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
@@ -150,69 +149,77 @@ impl ToolManager {
     }
 }
 
+// Static JSON schemas for tools
+static SHOW_LOG_SCHEMA: LazyLock<Map<String, Value>> = LazyLock::new(|| {
+    let mut schema = Map::new();
+    schema.insert("type".into(), "object".into());
+    schema.insert("properties".into(), serde_json::json!({
+        "limit": {
+            "type": "integer",
+            "description": "Maximum number of log entries to show (default: 20)",
+            "default": 20
+        },
+        "tool_name": {
+            "type": "string",
+            "description": "Filter logs by tool name"
+        },
+        "entry_type": {
+            "type": "string",
+            "enum": ["request", "response", "error", "stderr"],
+            "description": "Filter logs by entry type"
+        },
+        "keyword": {
+            "type": "string",
+            "description": "Regular expression pattern to search in log content (fallback to literal search if invalid regex)"
+        },
+        "format": {
+            "type": "string",
+            "enum": ["ai", "text", "json"],
+            "description": "Output format (default: ai)",
+            "default": "ai"
+        }
+    }));
+    schema
+});
+
+static EMPTY_SCHEMA: LazyLock<Map<String, Value>> = LazyLock::new(|| {
+    let mut schema = Map::new();
+    schema.insert("type".into(), "object".into());
+    schema.insert("properties".into(), serde_json::json!({}));
+    schema
+});
+
 // Tool creation functions
 
 fn create_show_log_tool() -> Tool {
-    create_tool(
-        Cow::Borrowed("show_log"),
-        Cow::Borrowed("Display recorded request/response logs from the wrapper"),
-        serde_json::json!({
-            "type": "object",
-            "properties": {
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of log entries to show (default: 20)",
-                    "default": 20
-                },
-                "tool_name": {
-                    "type": "string",
-                    "description": "Filter logs by tool name"
-                },
-                "entry_type": {
-                    "type": "string",
-                    "enum": ["request", "response", "error", "stderr"],
-                    "description": "Filter logs by entry type"
-                },
-                "keyword": {
-                    "type": "string",
-                    "description": "Regular expression pattern to search in log content (fallback to literal search if invalid regex)"
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["ai", "text", "json"],
-                    "description": "Output format (default: ai)",
-                    "default": "ai"
-                }
-            }
-        }),
-    )
+    Tool {
+        name: Cow::Borrowed("show_log"),
+        description: Some(Cow::Borrowed(
+            "Display recorded request/response logs from the wrapper",
+        )),
+        input_schema: Arc::new(SHOW_LOG_SCHEMA.clone()),
+        output_schema: None,
+        annotations: None,
+    }
 }
 
 fn create_clear_log_tool() -> Tool {
-    create_tool(
-        Cow::Borrowed("clear_log"),
-        Cow::Borrowed("Clear all recorded logs"),
-        serde_json::json!({}),
-    )
+    Tool {
+        name: Cow::Borrowed("clear_log"),
+        description: Some(Cow::Borrowed("Clear all recorded logs")),
+        input_schema: Arc::new(EMPTY_SCHEMA.clone()),
+        output_schema: None,
+        annotations: None,
+    }
 }
 
 fn create_restart_wrapped_server_tool() -> Tool {
-    create_tool(
-        Cow::Borrowed("restart_wrapped_server"),
-        Cow::Borrowed("Restart the wrapped MCP server while preserving logs"),
-        serde_json::json!({}),
-    )
-}
-
-fn create_tool(name: Cow<'static, str>, description: Cow<'static, str>, properties: Value) -> Tool {
-    let mut schema = Map::new();
-    schema.insert("type".into(), "object".into());
-    schema.insert("properties".into(), properties);
-
     Tool {
-        name,
-        description: Some(description),
-        input_schema: Arc::new(schema),
+        name: Cow::Borrowed("restart_wrapped_server"),
+        description: Some(Cow::Borrowed(
+            "Restart the wrapped MCP server while preserving logs",
+        )),
+        input_schema: Arc::new(EMPTY_SCHEMA.clone()),
         output_schema: None,
         annotations: None,
     }
