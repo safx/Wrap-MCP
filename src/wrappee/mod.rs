@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::WrappeeConfig;
 use anyhow::{Context, Result};
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Write};
@@ -18,7 +18,7 @@ pub struct WrappeeClient {
 }
 
 impl WrappeeClient {
-    pub fn spawn(command: &str, args: &[String], disable_colors: bool) -> Result<Self> {
+    pub fn spawn(command: &str, args: &[String], disable_colors: bool, config: WrappeeConfig) -> Result<Self> {
         tracing::info!("Spawning wrappee process: {command} {args:?}");
 
         let mut cmd = Command::new(command);
@@ -89,7 +89,6 @@ impl WrappeeClient {
         });
 
         // Get timeout from config
-        let config = Config::global();
         let timeout_secs = config.tool_timeout_secs;
 
         tracing::info!("Tool timeout set to {timeout_secs} seconds");
@@ -154,10 +153,8 @@ impl WrappeeClient {
         }
     }
 
-    pub async fn initialize(&mut self) -> Result<Value> {
-        // Get protocol version from config
-        let config = Config::global();
-        let protocol_version = &config.protocol_version;
+    pub async fn initialize(&mut self, protocol_version: &str) -> Result<Value> {
+        // Use provided protocol version
 
         tracing::info!("Initializing wrappee with protocol version: {protocol_version}",);
 

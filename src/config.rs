@@ -1,4 +1,3 @@
-use std::sync::OnceLock;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -15,30 +14,61 @@ pub enum ConfigError {
     },
 }
 
+/// Configuration for logging functionality
 #[derive(Debug, Clone)]
-pub struct Config {
-    pub transport: String,
-    pub log_colors: bool,
-    pub tool_timeout_secs: u64,
-    pub protocol_version: String,
+pub struct LogConfig {
     pub log_size: usize,
+    pub log_colors: bool,
     pub rust_log: String,
 }
 
-impl Default for Config {
+impl Default for LogConfig {
     fn default() -> Self {
         Self {
-            transport: "stdio".to_string(),
-            log_colors: false,
-            tool_timeout_secs: 30,
-            protocol_version: "2025.03.26".to_string(),
             log_size: 1000,
+            log_colors: false,
             rust_log: "info".to_string(),
         }
     }
 }
 
-static CONFIG: OnceLock<Config> = OnceLock::new();
+/// Configuration for wrappee process management
+#[derive(Debug, Clone)]
+pub struct WrappeeConfig {
+    pub tool_timeout_secs: u64,
+    pub protocol_version: String,
+}
+
+impl Default for WrappeeConfig {
+    fn default() -> Self {
+        Self {
+            tool_timeout_secs: 30,
+            protocol_version: "2025.03.26".to_string(),
+        }
+    }
+}
+
+/// Configuration for transport layer
+#[derive(Debug, Clone)]
+pub struct TransportConfig {
+    pub transport: String,
+}
+
+impl Default for TransportConfig {
+    fn default() -> Self {
+        Self {
+            transport: "stdio".to_string(),
+        }
+    }
+}
+
+/// Main configuration container
+#[derive(Debug, Clone, Default)]
+pub struct Config {
+    pub log: LogConfig,
+    pub wrappee: WrappeeConfig,
+    pub transport: TransportConfig,
+}
 
 impl Config {
     pub fn from_env() -> Result<Self, ConfigError> {
@@ -46,17 +76,17 @@ impl Config {
 
         // WRAP_MCP_TRANSPORT
         if let Ok(transport) = std::env::var("WRAP_MCP_TRANSPORT") {
-            config.transport = transport;
+            config.transport.transport = transport;
         }
 
         // WRAP_MCP_LOG_COLORS
         if let Ok(log_colors_str) = std::env::var("WRAP_MCP_LOG_COLORS") {
-            config.log_colors = log_colors_str.to_lowercase() == "true" || log_colors_str == "1";
+            config.log.log_colors = log_colors_str.to_lowercase() == "true" || log_colors_str == "1";
         }
 
         // WRAP_MCP_TOOL_TIMEOUT
         if let Ok(timeout_str) = std::env::var("WRAP_MCP_TOOL_TIMEOUT") {
-            config.tool_timeout_secs =
+            config.wrappee.tool_timeout_secs =
                 timeout_str.parse().map_err(|e| ConfigError::ParseError {
                     var: "WRAP_MCP_TOOL_TIMEOUT".to_string(),
                     expected_type: "u64".to_string(),
@@ -66,12 +96,12 @@ impl Config {
 
         // WRAP_MCP_PROTOCOL_VERSION
         if let Ok(protocol_version) = std::env::var("WRAP_MCP_PROTOCOL_VERSION") {
-            config.protocol_version = protocol_version;
+            config.wrappee.protocol_version = protocol_version;
         }
 
         // WRAP_MCP_LOGSIZE
         if let Ok(logsize_str) = std::env::var("WRAP_MCP_LOGSIZE") {
-            config.log_size = logsize_str.parse().map_err(|e| ConfigError::ParseError {
+            config.log.log_size = logsize_str.parse().map_err(|e| ConfigError::ParseError {
                 var: "WRAP_MCP_LOGSIZE".to_string(),
                 expected_type: "usize".to_string(),
                 source: Box::new(e),
@@ -80,18 +110,18 @@ impl Config {
 
         // RUST_LOG
         if let Ok(rust_log) = std::env::var("RUST_LOG") {
-            config.rust_log = rust_log;
+            config.log.rust_log = rust_log;
         }
 
         // Validation
-        if config.tool_timeout_secs == 0 {
+        if config.wrappee.tool_timeout_secs == 0 {
             return Err(ConfigError::InvalidValue {
                 var: "WRAP_MCP_TOOL_TIMEOUT".to_string(),
                 message: "timeout must be greater than 0".to_string(),
             });
         }
 
-        if config.log_size == 0 {
+        if config.log.log_size == 0 {
             return Err(ConfigError::InvalidValue {
                 var: "WRAP_MCP_LOGSIZE".to_string(),
                 message: "log size must be greater than 0".to_string(),
@@ -99,44 +129,6 @@ impl Config {
         }
 
         Ok(config)
-    }
-
-    pub fn initialize() -> Result<(), ConfigError> {
-        let config = Self::from_env()?;
-        CONFIG.set(config).map_err(|_| ConfigError::InvalidValue {
-            var: "CONFIG".to_string(),
-            message: "Configuration already initialized".to_string(),
-        })?;
-        Ok(())
-    }
-
-    pub fn global() -> &'static Config {
-        CONFIG
-            .get()
-            .expect("Config not initialized. Call Config::initialize() first")
-    }
-
-    #[cfg(test)]
-    pub fn test_default() -> Self {
-        Self::default()
-    }
-
-    #[cfg(test)]
-    pub fn set_for_testing(config: Config) {
-        use std::sync::Mutex;
-        static TEST_LOCK: Mutex<()> = Mutex::new(());
-        let _lock = TEST_LOCK.lock().unwrap();
-
-        // This is a workaround for testing. In production, CONFIG can only be set once.
-        // For tests, we need to be able to override it.
-        let _ = CONFIG.set(config);
-    }
-
-    #[cfg(test)]
-    pub fn new_with_log_size(log_size: usize) -> Self {
-        let mut config = Self::default();
-        config.log_size = log_size;
-        config
     }
 }
 
@@ -149,12 +141,12 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = Config::default();
-        assert_eq!(config.transport, "stdio");
-        assert_eq!(config.log_colors, false);
-        assert_eq!(config.tool_timeout_secs, 30);
-        assert_eq!(config.protocol_version, "2025.03.26");
-        assert_eq!(config.log_size, 1000);
-        assert_eq!(config.rust_log, "info");
+        assert_eq!(config.transport.transport, "stdio");
+        assert!(!config.log.log_colors);
+        assert_eq!(config.wrappee.tool_timeout_secs, 30);
+        assert_eq!(config.wrappee.protocol_version, "2025.03.26");
+        assert_eq!(config.log.log_size, 1000);
+        assert_eq!(config.log.rust_log, "info");
     }
 
     #[test]
@@ -183,12 +175,12 @@ mod tests {
         }
 
         let config = Config::from_env().unwrap();
-        assert_eq!(config.transport, "stdio");
-        assert_eq!(config.log_colors, false);
-        assert_eq!(config.tool_timeout_secs, 30);
-        assert_eq!(config.protocol_version, "2025.03.26");
-        assert_eq!(config.log_size, 1000);
-        assert_eq!(config.rust_log, "info");
+        assert_eq!(config.transport.transport, "stdio");
+        assert!(!config.log.log_colors);
+        assert_eq!(config.wrappee.tool_timeout_secs, 30);
+        assert_eq!(config.wrappee.protocol_version, "2025.03.26");
+        assert_eq!(config.log.log_size, 1000);
+        assert_eq!(config.log.rust_log, "info");
 
         // Restore original values
         unsafe {
@@ -204,20 +196,26 @@ mod tests {
     fn test_config_with_custom_values() {
         // Test by directly constructing Config instead of using environment variables
         let config = Config {
-            transport: "tcp".to_string(),
-            log_colors: true,
-            tool_timeout_secs: 60,
-            protocol_version: "2024.01.01".to_string(),
-            log_size: 500,
-            rust_log: "debug".to_string(),
+            transport: TransportConfig {
+                transport: "tcp".to_string(),
+            },
+            log: LogConfig {
+                log_colors: true,
+                log_size: 500,
+                rust_log: "debug".to_string(),
+            },
+            wrappee: WrappeeConfig {
+                tool_timeout_secs: 60,
+                protocol_version: "2024.01.01".to_string(),
+            },
         };
 
-        assert_eq!(config.transport, "tcp");
-        assert_eq!(config.log_colors, true);
-        assert_eq!(config.tool_timeout_secs, 60);
-        assert_eq!(config.protocol_version, "2024.01.01");
-        assert_eq!(config.log_size, 500);
-        assert_eq!(config.rust_log, "debug");
+        assert_eq!(config.transport.transport, "tcp");
+        assert!(config.log.log_colors);
+        assert_eq!(config.wrappee.tool_timeout_secs, 60);
+        assert_eq!(config.wrappee.protocol_version, "2024.01.01");
+        assert_eq!(config.log.log_size, 500);
+        assert_eq!(config.log.rust_log, "debug");
     }
 
     #[test]

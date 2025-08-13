@@ -1,21 +1,20 @@
 use anyhow::Result;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-use wrap_mcp::{WrapServer, config::Config, run};
+use wrap_mcp::{WrapServer, config::{Config, LogConfig}, run};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize configuration first
-    Config::initialize()?;
-    let config = Config::global();
+    // Load configuration from environment
+    let config = Config::from_env()?;
 
-    init_tracing(config);
+    init_tracing(&config.log);
 
     tracing::info!("Starting Wrap MCP Server");
 
-    let transport = &config.transport;
+    let transport = &config.transport.transport;
 
     // Create a shared server instance for signal handling
-    let server = WrapServer::new();
+    let server = WrapServer::new(config.log.clone(), config.wrappee.clone());
     let server_for_signal = server.clone();
 
     // Setup signal handlers
@@ -89,12 +88,12 @@ async fn main() -> Result<()> {
     }
 }
 
-fn init_tracing(config: &Config) {
+fn init_tracing(log_config: &LogConfig) {
     let env_filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&config.rust_log));
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(&log_config.rust_log));
 
     // Use ANSI colors from config
-    let enable_ansi = config.log_colors;
+    let enable_ansi = log_config.log_colors;
 
     let fmt_layer = tracing_subscriber::fmt::layer()
         .with_target(true)

@@ -1,6 +1,6 @@
 use crate::tools::clear_log::{ClearLogRequest, clear_log};
 use crate::tools::show_log::{ShowLogRequest, show_log};
-use crate::{logging::LogStorage, proxy::ProxyHandler, wrappee::WrappeeClient};
+use crate::{config::{LogConfig, WrappeeConfig}, logging::LogStorage, proxy::ProxyHandler, wrappee::WrappeeClient};
 use anyhow::Result;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rmcp::{
@@ -24,17 +24,19 @@ pub struct WrapServer {
     disable_colors: Arc<RwLock<bool>>,
     peer: Arc<RwLock<Option<Peer<RoleServer>>>>,
     shutting_down: Arc<AtomicBool>,
+    wrappee_config: Arc<WrappeeConfig>,
 }
 
 impl Default for WrapServer {
     fn default() -> Self {
-        Self::new()
+        use crate::config::{LogConfig, WrappeeConfig};
+        Self::new(LogConfig::default(), WrappeeConfig::default())
     }
 }
 
 impl WrapServer {
-    pub fn new() -> Self {
-        let log_storage = Arc::new(LogStorage::new());
+    pub fn new(log_config: LogConfig, wrappee_config: WrappeeConfig) -> Self {
+        let log_storage = Arc::new(LogStorage::new(log_config));
         let proxy_handler = Arc::new(ProxyHandler::new(log_storage));
 
         Self {
@@ -45,6 +47,7 @@ impl WrapServer {
             disable_colors: Arc::new(RwLock::new(false)),
             peer: Arc::new(RwLock::new(None)),
             shutting_down: Arc::new(AtomicBool::new(false)),
+            wrappee_config: Arc::new(wrappee_config),
         }
     }
 
@@ -73,10 +76,10 @@ impl WrapServer {
         tracing::info!("Starting wrappee process: {command} {args:?}");
 
         // Spawn the wrappee process
-        let mut wrappee_client = WrappeeClient::spawn(command, args, disable_colors)?;
+        let mut wrappee_client = WrappeeClient::spawn(command, args, disable_colors, self.wrappee_config.as_ref().clone())?;
 
         // Initialize the wrappee
-        wrappee_client.initialize().await?;
+        wrappee_client.initialize(&self.wrappee_config.protocol_version).await?;
 
         // Discover tools from wrappee
         self.proxy_handler

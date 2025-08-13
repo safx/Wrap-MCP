@@ -3,7 +3,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::config::Config;
+use crate::config::LogConfig;
 use crate::logging::{LogEntry, LogFilter};
 
 #[derive(Debug, Clone)]
@@ -15,10 +15,8 @@ pub struct LogStorage {
 }
 
 impl LogStorage {
-    pub fn new() -> Self {
-        let config = Config::global();
-        let max_entries = config.log_size;
-        Self::new_with_max_entries(max_entries)
+    pub fn new(config: LogConfig) -> Self {
+        Self::new_with_max_entries(config.log_size)
     }
 
     pub fn new_with_max_entries(max_entries: usize) -> Self {
@@ -137,6 +135,6 @@ impl LogStorage {
 
 impl Default for LogStorage {
     fn default() -> Self {
-        Self::new()
+        Self::new(LogConfig::default())
     }
 }
