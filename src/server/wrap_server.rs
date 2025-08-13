@@ -1,7 +1,7 @@
 use crate::{
     config::{LogConfig, WrappeeConfig},
     logging::LogStorage,
-    server::wrappee_controller::WrappeeController,
+    server::wrappee::WrappeeController,
     tools::ToolManager,
     wrappee::WrappeeClient,
 };
