@@ -3,6 +3,7 @@ use anyhow::Result;
 use rmcp::{ErrorData as McpError, model::*};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 #[derive(Debug, Deserialize, Serialize, JsonSchema)]
 pub struct ShowLogRequest {
@@ -26,6 +27,90 @@ fn default_limit() -> usize {
     20
 }
 
+// Helper function to format request arguments
+fn format_request_args(args: &Value) -> String {
+    if let Some(obj) = args.as_object() {
+        obj.iter()
+            .map(|(k, v)| {
+                let v_str = match v {
+                    Value::String(s) => format!("\"{s}\""),
+                    _ => v.to_string(),
+                };
+                format!("{k}: {v_str}")
+            })
+            .collect::<Vec<_>>()
+            .join(", ")
+    } else {
+        args.to_string()
+    }
+}
+
+// Format a request log entry
+fn format_request_entry(id: usize, tool_name: &str, args: &Value) -> String {
+    let args_str = format_request_args(args);
+    format!("[REQUEST #{id}] {tool_name}({args_str})\n")
+}
+
+// Format a response log entry
+fn format_response_entry(request_id: usize, response: &Value) -> String {
+    let mut output = String::new();
+
+    if let Some(result) = response.get("result")
+        && let Some(content_array) = result.get("content")
+        && let Some(arr) = content_array.as_array()
+    {
+        for item in arr {
+            if let Some(text) = item["text"].as_str() {
+                output.push_str(&format!("[RESPONSE #{request_id}] \"{text}\"\n"));
+            }
+        }
+    }
+
+    output
+}
+
+// Format an error log entry
+fn format_error_entry(request_id: usize, error: &str) -> String {
+    format!("[ERROR #{request_id}] {error}\n")
+}
+
+// Clean and format stderr message
+fn clean_stderr_message(message: &str) -> &str {
+    // Look for log prefix pattern like "2025-08-08T16:15:53.880856Z  INFO ThreadId(01) module::path: file.rs:123: "
+    if let Some(start) = message.find(": src/") {
+        // Find the position after the file location
+        if let Some(pos) = message[start..].find(": ") {
+            return &message[start + pos + 2..];
+        }
+    }
+
+    // For other log messages with level indicators
+    if message.contains(" INFO ")
+        || message.contains(" WARN ")
+        || message.contains(" ERROR ")
+        || message.contains(" DEBUG ")
+    {
+        // Try to extract after the module path
+        if let Some(module_start) = message.rfind(" ThreadId") {
+            if let Some(msg_start) = message[module_start..].find(": ") {
+                if let Some(second_colon) = message[module_start + msg_start + 2..].find(": ") {
+                    return &message[module_start + msg_start + 2 + second_colon + 2..];
+                } else {
+                    return &message[module_start + msg_start + 2..];
+                }
+            }
+        }
+    }
+
+    message
+}
+
+// Format a stderr log entry
+fn format_stderr_entry(message: &str) -> String {
+    let clean_msg = clean_stderr_message(message);
+    format!("[STDERR] {clean_msg}\n")
+}
+
 fn format_ai_output(logs: Vec<LogEntry>) -> Content {
     let mut output = String::new();
 
@@ -33,86 +118,22 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
         output.push_str("No log entries found.\n");
     } else {
         for log in &logs {
-            match &log.content {
+            let formatted_entry = match &log.content {
                 LogEntryContent::Request { tool_name, content } => {
-                    let args = content;
-                    let args_str = if let Some(obj) = args.as_object() {
-                        obj.iter()
-                            .map(|(k, v)| {
-                                let v_str = match v {
-                                    serde_json::Value::String(s) => format!("\"{s}\""),
-                                    _ => v.to_string(),
-                                };
-                                format!("{k}: {v_str}")
-                            })
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    } else {
-                        args.to_string()
-                    };
-                    output.push_str(&format!(
-                        "[REQUEST #{id}] {tool_name}({args_str})\n",
-                        id = log.id
-                    ));
+                    format_request_entry(log.id, tool_name, content)
                 }
                 LogEntryContent::Response {
                     request_id,
                     response,
                     ..
-                } => {
-                    if let Some(result) = response.get("result")
-                        && let Some(content_array) = result.get("content")
-                        && let Some(arr) = content_array.as_array()
-                    {
-                        for item in arr {
-                            if let Some(text) = item["text"].as_str() {
-                                output.push_str(&format!("[RESPONSE #{request_id}] \"{text}\"\n"));
-                            }
-                        }
-                    }
-                }
+                } => format_response_entry(*request_id, response),
                 LogEntryContent::Error {
                     request_id, error, ..
-                } => {
-                    output.push_str(&format!("[ERROR #{request_id}] {error}\n"));
-                }
-                LogEntryContent::Stderr { message } => {
-                    // Extract the essential part of stderr message
-                    // Look for log prefix pattern like "2025-08-08T16:15:53.880856Z  INFO ThreadId(01) module::path: file.rs:123: "
-                    let clean_msg = if let Some(start) = message.find(": src/") {
-                        // Find the position after the file location
-                        if let Some(pos) = message[start..].find(": ") {
-                            &message[start + pos + 2..]
-                        } else {
-                            message
-                        }
-                    } else if message.contains(" INFO ")
-                        || message.contains(" WARN ")
-                        || message.contains(" ERROR ")
-                        || message.contains(" DEBUG ")
-                    {
-                        // For other log messages, try to extract after the module path
-                        if let Some(module_start) = message.rfind(" ThreadId") {
-                            if let Some(msg_start) = message[module_start..].find(": ") {
-                                if let Some(second_colon) =
-                                    message[module_start + msg_start + 2..].find(": ")
-                                {
-                                    &message[module_start + msg_start + 2 + second_colon + 2..]
-                                } else {
-                                    &message[module_start + msg_start + 2..]
-                                }
-                            } else {
-                                message
-                            }
-                        } else {
-                            message
-                        }
-                    } else {
-                        message
-                    };
-                    output.push_str(&format!("[STDERR] {clean_msg}\n"));
-                }
-            }
+                } => format_error_entry(*request_id, error),
+                LogEntryContent::Stderr { message } => format_stderr_entry(message),
+            };
+
+            output.push_str(&formatted_entry);
             output.push('\n');
         }
     }
@@ -172,7 +193,10 @@ pub async fn show_log(
 
     let format = req.format.as_deref().unwrap_or("ai").trim(); // Default to AI format
     let content = match format {
-        "json" => Content::text(serde_json::to_string_pretty(&logs).unwrap()),
+        "json" => Content::text(
+            serde_json::to_string_pretty(&logs)
+                .unwrap_or_else(|e| format!("Failed to serialize logs: {}", e)),
+        ),
         "ai" => format_ai_output(logs),
         "text" => format_text_output(logs),
         _ => {

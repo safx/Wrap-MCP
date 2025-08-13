@@ -25,7 +25,6 @@ async fn main() -> Result<()> {
 
     let service_factory = move || {
         tracing::info!("Creating service instance");
-        let server_clone = server.clone();
 
         // Initialize wrappee in the background
         let server_init = server.clone();
@@ -37,7 +36,7 @@ async fn main() -> Result<()> {
             }
         });
 
-        Ok(server_clone)
+        Ok(server.clone())
     };
 
     match transport.as_str() {
