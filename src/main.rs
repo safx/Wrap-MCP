@@ -15,53 +15,9 @@ async fn main() -> Result<()> {
 
     // Create a shared server instance for signal handling
     let server = WrapServer::new(config.log.clone(), config.wrappee.clone());
-    let server_for_signal = server.clone();
-
+    
     // Setup signal handlers
-    #[cfg(unix)]
-    {
-        use tokio::signal::unix::{SignalKind, signal};
-
-        tokio::spawn(async move {
-            let mut sigterm =
-                signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
-            let mut sigint = signal(SignalKind::interrupt()).expect("Failed to listen for SIGINT");
-
-            tokio::select! {
-                _ = sigterm.recv() => {
-                    tracing::info!("Received SIGTERM");
-                    server_for_signal.shutdown().await;
-                    // Give some time for graceful shutdown
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    std::process::exit(0);
-                }
-                _ = sigint.recv() => {
-                    tracing::info!("Received SIGINT");
-                    server_for_signal.shutdown().await;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    std::process::exit(0);
-                }
-            }
-        });
-    }
-
-    #[cfg(not(unix))]
-    {
-        let server_for_signal = server.clone();
-        tokio::spawn(async move {
-            match tokio::signal::ctrl_c().await {
-                Ok(()) => {
-                    tracing::info!("Received Ctrl+C");
-                    server_for_signal.shutdown().await;
-                    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-                    std::process::exit(0);
-                }
-                Err(err) => {
-                    tracing::error!("Unable to listen for shutdown signal: {}", err);
-                }
-            }
-        });
-    }
+    setup_signal_handlers(server.clone());
 
     let service_factory = move || {
         tracing::info!("Creating service instance");
@@ -86,6 +42,54 @@ async fn main() -> Result<()> {
             anyhow::bail!("Unknown transport: {transport}. Use 'stdio' or 'streamable-http'",)
         }
     }
+}
+
+/// Setup signal handlers for graceful shutdown
+fn setup_signal_handlers(server: WrapServer) {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{SignalKind, signal};
+
+        tokio::spawn(async move {
+            let mut sigterm =
+                signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
+            let mut sigint = signal(SignalKind::interrupt()).expect("Failed to listen for SIGINT");
+
+            tokio::select! {
+                _ = sigterm.recv() => {
+                    tracing::info!("Received SIGTERM");
+                    handle_shutdown(server).await;
+                }
+                _ = sigint.recv() => {
+                    tracing::info!("Received SIGINT");
+                    handle_shutdown(server).await;
+                }
+            }
+        });
+    }
+
+    #[cfg(not(unix))]
+    {
+        tokio::spawn(async move {
+            match tokio::signal::ctrl_c().await {
+                Ok(()) => {
+                    tracing::info!("Received Ctrl+C");
+                    handle_shutdown(server).await;
+                }
+                Err(err) => {
+                    tracing::error!("Unable to listen for shutdown signal: {}", err);
+                }
+            }
+        });
+    }
+}
+
+/// Handle the shutdown process
+async fn handle_shutdown(server: WrapServer) {
+    server.shutdown().await;
+    // Give some time for graceful shutdown
+    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+    std::process::exit(0);
 }
 
 fn init_tracing(log_config: &LogConfig) {
