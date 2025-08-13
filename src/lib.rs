@@ -1,8 +1,7 @@
 pub mod config;
 pub mod logging;
-pub mod proxy;
-pub mod run;
+pub mod server;
 pub mod tools;
 pub mod wrappee;
 
-pub use tools::WrapServer;
+pub use server::WrapServer;

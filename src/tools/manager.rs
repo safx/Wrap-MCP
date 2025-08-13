@@ -8,12 +8,12 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
-pub struct ProxyHandler {
+pub struct ToolManager {
     pub wrappee_tools: Arc<RwLock<Vec<Tool>>>,
     pub log_storage: Arc<LogStorage>,
 }
 
-impl ProxyHandler {
+impl ToolManager {
     pub fn new(log_storage: Arc<LogStorage>) -> Self {
         Self {
             wrappee_tools: Arc::new(RwLock::new(Vec::new())),

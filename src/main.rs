@@ -3,7 +3,7 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 use wrap_mcp::{
     WrapServer,
     config::{Config, LogConfig},
-    run,
+    server::transport,
 };
 
 #[tokio::main]
@@ -39,8 +39,8 @@ async fn main() -> Result<()> {
     };
 
     match transport.as_str() {
-        "stdio" => run::run_stdio_server(service_factory).await,
-        "streamable-http" | "http" => run::run_http_server(service_factory).await,
+        "stdio" => transport::run_stdio_server(service_factory).await,
+        "streamable-http" | "http" => transport::run_http_server(service_factory).await,
         _ => {
             tracing::error!("Unknown transport: {transport}");
             anyhow::bail!("Unknown transport: {transport}. Use 'stdio' or 'streamable-http'",)

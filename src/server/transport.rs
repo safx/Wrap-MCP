@@ -22,7 +22,6 @@ where
     tracing::info!("Server started successfully on stdio transport");
     service.waiting().await?;
 
-    tracing::info!("Server shutting down");
     Ok(())
 }
 

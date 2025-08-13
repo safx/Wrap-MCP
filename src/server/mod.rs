@@ -1,9 +1,11 @@
+pub mod transport;
+
 use crate::tools::clear_log::{ClearLogRequest, clear_log};
 use crate::tools::show_log::{ShowLogRequest, show_log};
 use crate::{
     config::{LogConfig, WrappeeConfig},
     logging::LogStorage,
-    proxy::ProxyHandler,
+    tools::ToolManager,
     wrappee::WrappeeClient,
 };
 use anyhow::Result;
@@ -22,7 +24,7 @@ use tokio::time::{Duration, Instant};
 
 #[derive(Clone)]
 pub struct WrapServer {
-    proxy_handler: Arc<ProxyHandler>,
+    tool_manager: Arc<ToolManager>,
     wrappee: Arc<RwLock<Option<WrappeeClient>>>,
     wrappee_command: Arc<RwLock<Option<String>>>,
     wrappee_args: Arc<RwLock<Option<Vec<String>>>>,
@@ -42,10 +44,10 @@ impl Default for WrapServer {
 impl WrapServer {
     pub fn new(log_config: LogConfig, wrappee_config: WrappeeConfig) -> Self {
         let log_storage = Arc::new(LogStorage::new(log_config));
-        let proxy_handler = Arc::new(ProxyHandler::new(log_storage));
+        let tool_manager = Arc::new(ToolManager::new(log_storage));
 
         Self {
-            proxy_handler,
+            tool_manager,
             wrappee: Arc::new(RwLock::new(None)),
             wrappee_command: Arc::new(RwLock::new(None)),
             wrappee_args: Arc::new(RwLock::new(None)),
@@ -94,7 +96,7 @@ impl WrapServer {
             .await?;
 
         // Discover tools from wrappee
-        self.proxy_handler
+        self.tool_manager
             .discover_tools(&mut wrappee_client)
             .await?;
 
@@ -104,7 +106,7 @@ impl WrapServer {
     /// Start stderr monitoring for the wrappee
     fn start_stderr_monitoring(&self) {
         let wrappee_clone = self.wrappee.clone();
-        let log_storage = self.proxy_handler.log_storage.clone();
+        let log_storage = self.tool_manager.log_storage.clone();
         tokio::spawn(async move {
             loop {
                 let mut wrappee_guard = wrappee_clone.write().await;
@@ -171,11 +173,11 @@ impl WrapServer {
         if preserve_ansi {
             tracing::info!("ANSI escape sequences will be preserved (--ansi option)");
             // Store the flag in log storage (false = don't remove ANSI)
-            self.proxy_handler.log_storage.set_ansi_removal(false).await;
+            self.tool_manager.log_storage.set_ansi_removal(false).await;
         } else {
             tracing::info!("ANSI escape sequence removal enabled (default)");
             // Store the flag in log storage (true = remove ANSI)
-            self.proxy_handler.log_storage.set_ansi_removal(true).await;
+            self.tool_manager.log_storage.set_ansi_removal(true).await;
         }
 
         if watch_binary {
@@ -455,7 +457,7 @@ impl WrapServer {
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         // Clear tools before restarting
-        self.proxy_handler.clear_tools().await;
+        self.tool_manager.clear_tools().await;
 
         // Start new wrappee using stored command and args
         let wrappee_client = {
@@ -500,7 +502,7 @@ impl WrapServer {
                 message: format!("Invalid parameters: {e}").into(),
                 data: None,
             })?;
-            return show_log(req, &self.proxy_handler.log_storage).await;
+            return show_log(req, &self.tool_manager.log_storage).await;
         }
 
         if name == "clear_log" {
@@ -509,13 +511,13 @@ impl WrapServer {
                 message: format!("Invalid parameters: {e}").into(),
                 data: None,
             })?;
-            return clear_log(req, &self.proxy_handler.log_storage).await;
+            return clear_log(req, &self.tool_manager.log_storage).await;
         }
 
         // Proxy to wrappee
         let mut wrappee_guard = self.wrappee.write().await;
         if let Some(wrappee) = wrappee_guard.as_mut() {
-            self.proxy_handler
+            self.tool_manager
                 .proxy_tool_call(name, arguments, wrappee)
                 .await
         } else {
@@ -555,7 +557,7 @@ impl ServerHandler for WrapServer {
         // Store peer for future notifications
         *self.peer.write().await = Some(context.peer.clone());
 
-        let tools = self.proxy_handler.get_all_tools().await;
+        let tools = self.tool_manager.get_all_tools().await;
         Ok(ListToolsResult {
             tools,
             next_cursor: None,

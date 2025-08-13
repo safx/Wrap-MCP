@@ -2,7 +2,7 @@
 mod tests {
     use std::sync::Arc;
     use wrap_mcp::logging::LogStorage;
-    use wrap_mcp::proxy::ProxyHandler;
+    use wrap_mcp::tools::ToolManager;
 
     #[tokio::test]
     async fn test_log_storage() {
@@ -70,9 +70,9 @@ mod tests {
     fn test_proxy_handler_creation() {
         // Use test-specific constructor to avoid needing Config::global()
         let log_storage = Arc::new(LogStorage::new_with_max_entries(1000));
-        let proxy = ProxyHandler::new(log_storage.clone());
+        let tool_manager = ToolManager::new(log_storage.clone());
 
-        // Proxy should be created successfully - proxy holds one reference
-        assert_eq!(Arc::strong_count(&proxy.log_storage), 2);
+        // Tool manager should be created successfully - tool manager holds one reference
+        assert_eq!(Arc::strong_count(&tool_manager.log_storage), 2);
     }
 }
