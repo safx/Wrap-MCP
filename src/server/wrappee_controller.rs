@@ -3,9 +3,9 @@ use anyhow::Result;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-/// Manages the state and lifecycle of a wrappee process
+/// Controls the lifecycle and state of a wrapped MCP process
 #[derive(Clone)]
-pub struct WrappeeState {
+pub struct WrappeeController {
     /// The active wrappee client connection
     pub(crate) client: Arc<RwLock<Option<WrappeeClient>>>,
 
@@ -22,7 +22,7 @@ pub struct WrappeeState {
     pub(crate) config: Arc<WrappeeConfig>,
 }
 
-impl WrappeeState {
+impl WrappeeController {
     pub fn new(wrappee_config: &WrappeeConfig) -> Self {
         Self {
             client: Arc::new(RwLock::new(None)),

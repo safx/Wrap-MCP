@@ -16,17 +16,14 @@ impl WrapServer {
         let opts = CliOptions::from_args();
 
         // Configure ANSI removal
-        if opts.preserve_ansi {
-            tracing::info!("ANSI escape sequences will be preserved (--ansi option)");
-            self.tool_manager.log_storage.set_ansi_removal(false).await;
-        } else {
-            tracing::info!("ANSI escape sequence removal enabled (default)");
-            self.tool_manager.log_storage.set_ansi_removal(true).await;
-        }
+        self.tool_manager
+            .log_storage
+            .set_ansi_removal(!opts.preserve_ansi)
+            .await;
 
         // Initialize the wrappee
         let init_result = self
-            .wrappee_state
+            .wrappee_controller
             .initialize(
                 &opts.command,
                 &opts.args,
@@ -63,7 +60,7 @@ impl WrapServer {
         tracing::info!("Restarting wrapped server");
 
         // Restart the wrappee
-        self.wrappee_state
+        self.wrappee_controller
             .restart(&self.tool_manager)
             .await
             .map_err(|e| McpError {
@@ -112,7 +109,7 @@ impl WrapServer {
             }
             _ => {
                 // Proxy to wrappee
-                self.wrappee_state
+                self.wrappee_controller
                     .proxy_tool_call(name, arguments, &self.tool_manager)
                     .await
             }

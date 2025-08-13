@@ -9,7 +9,7 @@ impl WrapServer {
     pub(crate) async fn start_file_watching(&self) -> Result<()> {
         // Only clone if we actually have a command to watch
         let binary_path = {
-            let command_guard = self.wrappee_state.command.read().await;
+            let command_guard = self.wrappee_controller.command.read().await;
             command_guard.as_ref().cloned()
         };
 
@@ -122,7 +122,7 @@ impl WrapServer {
                                 // Check if file exists before attempting restart
                                 if std::path::Path::new(&binary_path_clone).exists() {
                                     // Check if this is an initial start or a restart
-                                    let has_existing_wrappee = server.wrappee_state.is_active().await;
+                                    let has_existing_wrappee = server.wrappee_controller.is_active().await;
 
                                     if has_existing_wrappee {
                                         tracing::info!("Binary file change detected, triggering restart after debounce");
@@ -143,11 +143,11 @@ impl WrapServer {
                                         tracing::info!("Binary file now exists, performing initial start");
 
                                         // Get stored command and args without cloning
-                                        if let Some((cmd, args, disable_colors)) = server.wrappee_state.get_command().await {
+                                        if let Some((cmd, args, disable_colors)) = server.wrappee_controller.get_command().await {
                                             // Start the wrappee
                                             match server.start_wrappee_internal(&cmd, &args, disable_colors).await {
                                                 Ok(wrappee_client) => {
-                                                    server.wrappee_state.set_client(Some(wrappee_client)).await;
+                                                    server.wrappee_controller.set_client(Some(wrappee_client)).await;
                                                     server.start_stderr_monitoring();
 
                                                     // Get PID of newly started process

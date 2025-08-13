@@ -1,7 +1,7 @@
 use crate::{
     config::{LogConfig, WrappeeConfig},
     logging::LogStorage,
-    server::wrappee_state::WrappeeState,
+    server::wrappee_controller::WrappeeController,
     tools::ToolManager,
     wrappee::WrappeeClient,
 };
@@ -14,7 +14,7 @@ use tokio::sync::RwLock;
 #[derive(Clone)]
 pub struct WrapServer {
     pub(crate) tool_manager: Arc<ToolManager>,
-    pub(crate) wrappee_state: Arc<WrappeeState>,
+    pub(crate) wrappee_controller: Arc<WrappeeController>,
     pub(crate) peer: Arc<RwLock<Option<Peer<RoleServer>>>>,
     pub(crate) shutting_down: Arc<AtomicBool>,
 }
@@ -24,11 +24,11 @@ impl WrapServer {
         let log_storage = Arc::new(LogStorage::new(log_config));
         let tool_manager = Arc::new(ToolManager::new(log_storage));
 
-        let wrappee_state = Arc::new(WrappeeState::new(wrappee_config));
+        let wrappee_controller = Arc::new(WrappeeController::new(wrappee_config));
 
         Self {
             tool_manager,
-            wrappee_state,
+            wrappee_controller,
             peer: Arc::new(RwLock::new(None)),
             shutting_down: Arc::new(AtomicBool::new(false)),
         }
@@ -92,7 +92,7 @@ impl WrapServer {
         self.shutting_down.store(true, Ordering::SeqCst);
 
         // Shutdown wrappee
-        if let Err(e) = self.wrappee_state.shutdown().await {
+        if let Err(e) = self.wrappee_controller.shutdown().await {
             tracing::warn!("Error shutting down wrappee: {}", e);
         }
     }
@@ -104,19 +104,19 @@ impl WrapServer {
         args: &[String],
         disable_colors: bool,
     ) -> Result<WrappeeClient> {
-        // Delegate to WrappeeState
-        self.wrappee_state
+        // Delegate to WrappeeController
+        self.wrappee_controller
             .start_wrappee(command, args, disable_colors, &self.tool_manager)
             .await
     }
 
     /// Start stderr monitoring for the wrappee
     pub(crate) fn start_stderr_monitoring(&self) {
-        let wrappee_state = self.wrappee_state.clone();
+        let wrappee_controller = self.wrappee_controller.clone();
         let log_storage = self.tool_manager.log_storage.clone();
         tokio::spawn(async move {
             loop {
-                let mut wrappee_guard = wrappee_state.get_client_mut().await;
+                let mut wrappee_guard = wrappee_controller.get_client_mut().await;
                 if let Some(wrappee) = wrappee_guard.as_mut()
                     && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await
                 {
@@ -130,7 +130,7 @@ impl WrapServer {
 
     /// Get PID of current wrappee process
     pub(crate) async fn get_wrappee_pid(&self) -> Option<u32> {
-        self.wrappee_state.get_pid().await
+        self.wrappee_controller.get_pid().await
     }
 
     /// Send tool list changed notification if peer is available
