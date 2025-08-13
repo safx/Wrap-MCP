@@ -63,75 +63,13 @@ impl ProxyHandler {
         let wrappee_tools = self.wrappee_tools.read().await;
 
         // Create a new vector with capacity for all tools
-        let mut all_tools = Vec::with_capacity(wrappee_tools.len() + 2);
+        let mut all_tools = Vec::with_capacity(wrappee_tools.len() + 3);
         all_tools.extend(wrappee_tools.iter().cloned());
 
-        // Add show_log tool
-        let mut show_log_schema = Map::new();
-        show_log_schema.insert("type".into(), "object".into());
-        show_log_schema.insert(
-            "properties".into(),
-            serde_json::json!({
-                "limit": {
-                    "type": "integer",
-                    "description": "Maximum number of log entries to show (default: 20)",
-                    "default": 20
-                },
-                "tool_name": {
-                    "type": "string",
-                    "description": "Filter logs by tool name"
-                },
-                "entry_type": {
-                    "type": "string",
-                    "enum": ["request", "response", "error", "stderr"],
-                    "description": "Filter logs by entry type"
-                },
-                "keyword": {
-                    "type": "string",
-                    "description": "Regular expression pattern to search in log content (fallback to literal search if invalid regex)"
-                },
-                "format": {
-                    "type": "string",
-                    "enum": ["ai", "text", "json"],
-                    "description": "Output format (default: ai)",
-                    "default": "ai"
-                }
-            }),
-        );
-
-        all_tools.push(Tool {
-            name: "show_log".into(),
-            description: Some("Display recorded request/response logs from the wrapper".into()),
-            input_schema: Arc::new(show_log_schema),
-            output_schema: None,
-            annotations: None,
-        });
-
-        // Add clear_log tool
-        let mut clear_log_schema = Map::new();
-        clear_log_schema.insert("type".into(), "object".into());
-        clear_log_schema.insert("properties".into(), serde_json::json!({}));
-
-        all_tools.push(Tool {
-            name: "clear_log".into(),
-            description: Some("Clear all recorded logs".into()),
-            input_schema: Arc::new(clear_log_schema),
-            output_schema: None,
-            annotations: None,
-        });
-
-        // Add restart_wrapped_server tool
-        let mut restart_schema = Map::new();
-        restart_schema.insert("type".into(), "object".into());
-        restart_schema.insert("properties".into(), serde_json::json!({}));
-
-        all_tools.push(Tool {
-            name: "restart_wrapped_server".into(),
-            description: Some("Restart the wrapped MCP server while preserving logs".into()),
-            input_schema: Arc::new(restart_schema),
-            output_schema: None,
-            annotations: None,
-        });
+        // Add wrapper-provided tools
+        all_tools.push(create_show_log_tool());
+        all_tools.push(create_clear_log_tool());
+        all_tools.push(create_restart_wrapped_server_tool());
 
         all_tools
     }
@@ -208,5 +146,77 @@ impl ProxyHandler {
                 })
             }
         }
+    }
+}
+
+// Tool creation functions
+
+fn create_show_log_tool() -> Tool {
+    let mut schema = Map::new();
+    schema.insert("type".into(), "object".into());
+    schema.insert(
+        "properties".into(),
+        serde_json::json!({
+            "limit": {
+                "type": "integer",
+                "description": "Maximum number of log entries to show (default: 20)",
+                "default": 20
+            },
+            "tool_name": {
+                "type": "string",
+                "description": "Filter logs by tool name"
+            },
+            "entry_type": {
+                "type": "string",
+                "enum": ["request", "response", "error", "stderr"],
+                "description": "Filter logs by entry type"
+            },
+            "keyword": {
+                "type": "string",
+                "description": "Regular expression pattern to search in log content (fallback to literal search if invalid regex)"
+            },
+            "format": {
+                "type": "string",
+                "enum": ["ai", "text", "json"],
+                "description": "Output format (default: ai)",
+                "default": "ai"
+            }
+        }),
+    );
+
+    Tool {
+        name: "show_log".into(),
+        description: Some("Display recorded request/response logs from the wrapper".into()),
+        input_schema: Arc::new(schema),
+        output_schema: None,
+        annotations: None,
+    }
+}
+
+fn create_clear_log_tool() -> Tool {
+    let mut schema = Map::new();
+    schema.insert("type".into(), "object".into());
+    schema.insert("properties".into(), serde_json::json!({}));
+
+    Tool {
+        name: "clear_log".into(),
+        description: Some("Clear all recorded logs".into()),
+        input_schema: Arc::new(schema),
+        output_schema: None,
+        annotations: None,
+    }
+}
+
+fn create_restart_wrapped_server_tool() -> Tool {
+    let mut schema = Map::new();
+    schema.insert("type".into(), "object".into());
+    schema.insert("properties".into(), serde_json::json!({}));
+
+    Tool {
+        name: "restart_wrapped_server".into(),
+        description: Some("Restart the wrapped MCP server while preserving logs".into()),
+        input_schema: Arc::new(schema),
+        output_schema: None,
+        annotations: None,
     }
 }

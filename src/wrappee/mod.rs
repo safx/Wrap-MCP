@@ -18,7 +18,12 @@ pub struct WrappeeClient {
 }
 
 impl WrappeeClient {
-    pub fn spawn(command: &str, args: &[String], disable_colors: bool, config: WrappeeConfig) -> Result<Self> {
+    pub fn spawn(
+        command: &str,
+        args: &[String],
+        disable_colors: bool,
+        config: WrappeeConfig,
+    ) -> Result<Self> {
         tracing::info!("Spawning wrappee process: {command} {args:?}");
 
         let mut cmd = Command::new(command);

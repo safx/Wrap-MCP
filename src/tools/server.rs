@@ -1,6 +1,11 @@
 use crate::tools::clear_log::{ClearLogRequest, clear_log};
 use crate::tools::show_log::{ShowLogRequest, show_log};
-use crate::{config::{LogConfig, WrappeeConfig}, logging::LogStorage, proxy::ProxyHandler, wrappee::WrappeeClient};
+use crate::{
+    config::{LogConfig, WrappeeConfig},
+    logging::LogStorage,
+    proxy::ProxyHandler,
+    wrappee::WrappeeClient,
+};
 use anyhow::Result;
 use notify::{Config, Event, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use rmcp::{
@@ -76,10 +81,17 @@ impl WrapServer {
         tracing::info!("Starting wrappee process: {command} {args:?}");
 
         // Spawn the wrappee process
-        let mut wrappee_client = WrappeeClient::spawn(command, args, disable_colors, self.wrappee_config.as_ref().clone())?;
+        let mut wrappee_client = WrappeeClient::spawn(
+            command,
+            args,
+            disable_colors,
+            self.wrappee_config.as_ref().clone(),
+        )?;
 
         // Initialize the wrappee
-        wrappee_client.initialize(&self.wrappee_config.protocol_version).await?;
+        wrappee_client
+            .initialize(&self.wrappee_config.protocol_version)
+            .await?;
 
         // Discover tools from wrappee
         self.proxy_handler

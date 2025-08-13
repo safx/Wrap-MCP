@@ -1,6 +1,10 @@
 use anyhow::Result;
 use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
-use wrap_mcp::{WrapServer, config::{Config, LogConfig}, run};
+use wrap_mcp::{
+    WrapServer,
+    config::{Config, LogConfig},
+    run,
+};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -15,7 +19,7 @@ async fn main() -> Result<()> {
 
     // Create a shared server instance for signal handling
     let server = WrapServer::new(config.log.clone(), config.wrappee.clone());
-    
+
     // Setup signal handlers
     setup_signal_handlers(server.clone());
 

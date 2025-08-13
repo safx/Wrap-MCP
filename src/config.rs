@@ -81,7 +81,8 @@ impl Config {
 
         // WRAP_MCP_LOG_COLORS
         if let Ok(log_colors_str) = std::env::var("WRAP_MCP_LOG_COLORS") {
-            config.log.log_colors = log_colors_str.to_lowercase() == "true" || log_colors_str == "1";
+            config.log.log_colors =
+                log_colors_str.to_lowercase() == "true" || log_colors_str == "1";
         }
 
         // WRAP_MCP_TOOL_TIMEOUT
