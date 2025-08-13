@@ -65,9 +65,7 @@ impl WrapServer {
         tracing::info!("Initializing wrappee with command: {command} {wrappee_args:?}");
 
         // Store command and args for potential restart
-        *self.wrappee_command.write().await = Some(command.clone());
-        *self.wrappee_args.write().await = Some(wrappee_args.clone());
-        *self.disable_colors.write().await = !preserve_ansi;
+        self.wrappee_state.set_command(command.clone(), wrappee_args.clone(), !preserve_ansi).await;
 
         // Start the wrappee using the common method
         let wrappee_result = self
@@ -77,7 +75,7 @@ impl WrapServer {
         match wrappee_result {
             Ok(wrappee_client) => {
                 // Store the wrappee client
-                *self.wrappee.write().await = Some(wrappee_client);
+                self.wrappee_state.set_client(Some(wrappee_client)).await;
 
                 // Start stderr monitoring in the background
                 self.start_stderr_monitoring();
@@ -104,13 +102,7 @@ impl WrapServer {
         tracing::info!("Restarting wrapped server");
 
         // Check if command and args are available
-        let has_config = {
-            let cmd_guard = self.wrappee_command.read().await;
-            let args_guard = self.wrappee_args.read().await;
-            cmd_guard.is_some() && args_guard.is_some()
-        };
-
-        if !has_config {
+        if !self.wrappee_state.has_config().await {
             return Err(McpError {
                 code: ErrorCode::INTERNAL_ERROR,
                 message: "No wrapped server to restart".into(),
@@ -119,13 +111,10 @@ impl WrapServer {
         }
 
         // Shutdown existing wrappee
-        {
-            let mut wrappee_guard = self.wrappee.write().await;
-            if let Some(client) = wrappee_guard.take() {
-                tracing::info!("Shutting down existing wrapped server");
-                if let Err(e) = client.shutdown().await {
-                    tracing::warn!("Error during shutdown: {e}");
-                }
+        if let Some(client) = self.wrappee_state.take_client().await {
+            tracing::info!("Shutting down existing wrapped server");
+            if let Err(e) = client.shutdown().await {
+                tracing::warn!("Error during shutdown: {e}");
             }
         }
 
@@ -136,22 +125,20 @@ impl WrapServer {
         self.tool_manager.clear_tools().await;
 
         // Start new wrappee using stored command and args
-        let wrappee_client = {
-            let command_guard = self.wrappee_command.read().await;
-            let args_guard = self.wrappee_args.read().await;
-            let disable_colors = *self.disable_colors.read().await;
+        let (command, args, disable_colors) = self.wrappee_state.get_command().await
+            .ok_or_else(|| McpError {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: "Configuration lost unexpectedly".into(),
+                data: None,
+            })?;
 
-            // We checked above that both are Some
-            let command = command_guard.as_ref().unwrap();
-            let args = args_guard.as_ref().unwrap();
-
-            self.start_wrappee_internal(command, args, disable_colors)
-                .await
-        }
+        let wrappee_client = self
+            .start_wrappee_internal(&command, &args, disable_colors)
+            .await
         .map_err(|e| Self::error_to_mcp(e, "Failed to restart wrapped server"))?;
 
         // Store the new wrappee client
-        *self.wrappee.write().await = Some(wrappee_client);
+        self.wrappee_state.set_client(Some(wrappee_client)).await;
 
         // Send tool list changed notification if peer is available
         self.notify_tools_changed().await;
@@ -191,7 +178,7 @@ impl WrapServer {
         }
 
         // Proxy to wrappee
-        let mut wrappee_guard = self.wrappee.write().await;
+        let mut wrappee_guard = self.wrappee_state.get_client_mut().await;
         if let Some(wrappee) = wrappee_guard.as_mut() {
             self.tool_manager
                 .proxy_tool_call(name, arguments, wrappee)

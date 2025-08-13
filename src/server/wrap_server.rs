@@ -1,6 +1,7 @@
 use crate::{
     config::{LogConfig, WrappeeConfig},
     logging::LogStorage,
+    server::wrappee_state::WrappeeState,
     tools::ToolManager,
     wrappee::WrappeeClient,
 };
@@ -13,13 +14,9 @@ use tokio::sync::RwLock;
 #[derive(Clone)]
 pub struct WrapServer {
     pub(crate) tool_manager: Arc<ToolManager>,
-    pub(crate) wrappee: Arc<RwLock<Option<WrappeeClient>>>,
-    pub(crate) wrappee_command: Arc<RwLock<Option<String>>>,
-    pub(crate) wrappee_args: Arc<RwLock<Option<Vec<String>>>>,
-    pub(crate) disable_colors: Arc<RwLock<bool>>,
+    pub(crate) wrappee_state: Arc<WrappeeState>,
     pub(crate) peer: Arc<RwLock<Option<Peer<RoleServer>>>>,
     pub(crate) shutting_down: Arc<AtomicBool>,
-    pub(crate) wrappee_config: Arc<WrappeeConfig>,
 }
 
 impl WrapServer {
@@ -27,15 +24,13 @@ impl WrapServer {
         let log_storage = Arc::new(LogStorage::new(log_config));
         let tool_manager = Arc::new(ToolManager::new(log_storage));
 
+        let wrappee_state = Arc::new(WrappeeState::new(wrappee_config));
+
         Self {
             tool_manager,
-            wrappee: Arc::new(RwLock::new(None)),
-            wrappee_command: Arc::new(RwLock::new(None)),
-            wrappee_args: Arc::new(RwLock::new(None)),
-            disable_colors: Arc::new(RwLock::new(false)),
+            wrappee_state,
             peer: Arc::new(RwLock::new(None)),
             shutting_down: Arc::new(AtomicBool::new(false)),
-            wrappee_config: Arc::new(wrappee_config.clone()),
         }
     }
 
@@ -97,8 +92,7 @@ impl WrapServer {
         self.shutting_down.store(true, Ordering::SeqCst);
 
         // Shutdown wrappee
-        let mut wrappee_guard = self.wrappee.write().await;
-        if let Some(client) = wrappee_guard.take() {
+        if let Some(client) = self.wrappee_state.take_client().await {
             tracing::info!("Shutting down wrappee process");
             if let Err(e) = client.shutdown().await {
                 tracing::warn!("Error shutting down wrappee: {}", e);
@@ -120,12 +114,12 @@ impl WrapServer {
             command,
             args,
             disable_colors,
-            self.wrappee_config.as_ref().clone(),
+            self.wrappee_state.config.as_ref().clone(),
         )?;
 
         // Initialize the wrappee
         wrappee_client
-            .initialize(&self.wrappee_config.protocol_version)
+            .initialize(&self.wrappee_state.config.protocol_version)
             .await?;
 
         // Discover tools from wrappee
@@ -138,11 +132,11 @@ impl WrapServer {
 
     /// Start stderr monitoring for the wrappee
     pub(crate) fn start_stderr_monitoring(&self) {
-        let wrappee_clone = self.wrappee.clone();
+        let wrappee_state = self.wrappee_state.clone();
         let log_storage = self.tool_manager.log_storage.clone();
         tokio::spawn(async move {
             loop {
-                let mut wrappee_guard = wrappee_clone.write().await;
+                let mut wrappee_guard = wrappee_state.get_client_mut().await;
                 if let Some(wrappee) = wrappee_guard.as_mut()
                     && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await
                 {
@@ -156,7 +150,7 @@ impl WrapServer {
 
     /// Get PID of current wrappee process
     pub(crate) async fn get_wrappee_pid(&self) -> Option<u32> {
-        let wrappee_guard = self.wrappee.read().await;
+        let wrappee_guard = self.wrappee_state.client.read().await;
         if let Some(wrappee) = wrappee_guard.as_ref() {
             wrappee.get_pid().await
         } else {
