@@ -132,9 +132,3 @@ impl LogStorage {
         ansi_regex.replace_all(text, "").to_string()
     }
 }
-
-impl Default for LogStorage {
-    fn default() -> Self {
-        Self::new(LogConfig::default())
-    }
-}
