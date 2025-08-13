@@ -20,8 +20,8 @@ async fn main() -> Result<()> {
     // Create a shared server instance for signal handling
     let server = WrapServer::new(&config.log, &config.wrappee);
 
-    // Setup signal handlers
-    server.setup_signal_handlers();
+    // Setup signal handlers with a delay to avoid premature shutdown during initialization
+    server.setup_signal_handlers_delayed();
 
     let service_factory = move || {
         tracing::info!("Creating service instance");

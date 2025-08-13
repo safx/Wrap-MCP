@@ -34,8 +34,18 @@ impl WrapServer {
         }
     }
 
-    /// Setup signal handlers for graceful shutdown
-    pub fn setup_signal_handlers(&self) {
+    /// Setup signal handlers for graceful shutdown with a delay to avoid premature shutdown
+    pub fn setup_signal_handlers_delayed(&self) {
+        let server = self.clone();
+        tokio::spawn(async move {
+            // Wait for 500ms to ensure initialization is complete
+            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+            server.setup_signal_handlers_internal();
+        });
+    }
+
+    /// Internal method to setup signal handlers
+    fn setup_signal_handlers_internal(&self) {
         let server = self.clone();
 
         #[cfg(unix)]
