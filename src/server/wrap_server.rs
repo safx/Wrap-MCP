@@ -43,10 +43,15 @@ impl WrapServer {
             use tokio::signal::unix::{SignalKind, signal};
 
             tokio::spawn(async move {
-                let mut sigterm =
-                    signal(SignalKind::terminate()).expect("Failed to listen for SIGTERM");
-                let mut sigint =
-                    signal(SignalKind::interrupt()).expect("Failed to listen for SIGINT");
+                let mut sigterm = match signal(SignalKind::terminate()) {
+                    Ok(sig) => sig,
+                    Err(e) => return tracing::error!("Failed to listen for SIGTERM: {e}"),
+                };
+
+                let mut sigint = match signal(SignalKind::interrupt()) {
+                    Ok(sig) => sig,
+                    Err(e) => return tracing::error!("Failed to listen for SIGINT: {e}"),
+                };
 
                 tokio::select! {
                     _ = sigterm.recv() => {

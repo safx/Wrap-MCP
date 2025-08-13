@@ -38,9 +38,13 @@ impl WrapServer {
                 self.start_stderr_monitoring();
             }
             Err(e) => {
-                // If not in watch mode, panic on failure to start wrappee
+                // If not in watch mode, return error instead of panicking
                 if !opts.watch_binary {
-                    panic!("Failed to spawn wrappee process '{}': {e}", opts.command);
+                    tracing::error!("Failed to spawn wrappee process '{}': {e}", opts.command);
+                    return Err(anyhow::anyhow!(
+                        "Failed to spawn wrappee process '{}': {e}",
+                        opts.command
+                    ));
                 }
                 // In watch mode, log the error but continue to set up file watching
                 tracing::warn!("Failed to start wrappee (will wait for file creation): {e}");

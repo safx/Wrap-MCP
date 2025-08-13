@@ -47,8 +47,8 @@ impl WrapServer {
                 Config::default(),
             )
             .map_err(|e| {
-                // Panic on watcher creation failure
-                panic!("Failed to create file watcher: {e}");
+                tracing::error!("Failed to create file watcher: {e}");
+                anyhow::anyhow!("Failed to create file watcher: {e}")
             })?;
 
             // Determine what to watch
@@ -70,7 +70,8 @@ impl WrapServer {
             watcher
                 .watch(&watch_path, RecursiveMode::NonRecursive)
                 .map_err(|e| {
-                    panic!("Failed to watch path {}: {e}", watch_path.display());
+                    tracing::error!("Failed to watch path {}: {e}", watch_path.display());
+                    anyhow::anyhow!("Failed to watch path {}: {e}", watch_path.display())
                 })?;
 
             // Keep watcher alive by storing it

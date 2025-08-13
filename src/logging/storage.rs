@@ -1,10 +1,14 @@
+use regex::Regex;
 use serde_json::Value;
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use tokio::sync::RwLock;
 
 use crate::config::LogConfig;
 use crate::logging::{LogEntry, LogFilter};
+
+// Compile the ANSI regex once at startup
+static ANSI_REGEX: OnceLock<Regex> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 pub struct LogStorage {
@@ -126,9 +130,9 @@ impl LogStorage {
 
     /// Remove ANSI escape sequences from a string
     fn remove_ansi_sequences(text: &str) -> String {
-        // Pattern to match ANSI escape sequences
-        // Matches: ESC[...m, ESC[...K, ESC[...H, ESC[...J, etc.
-        let ansi_regex = regex::Regex::new(r"\x1b\[[0-9;]*[mGKHJF]").unwrap();
-        ansi_regex.replace_all(text, "").to_string()
+        let regex = ANSI_REGEX.get_or_init(|| {
+            Regex::new(r"\x1b\[[0-9;]*[mGKHJF]").expect("Failed to compile ANSI regex")
+        });
+        regex.replace_all(text, "").to_string()
     }
 }
