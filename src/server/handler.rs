@@ -48,11 +48,7 @@ impl ServerHandler for WrapServer {
             .map(serde_json::Value::Object)
             .unwrap_or(serde_json::Value::Object(serde_json::Map::new()));
 
-        // Handle restart_wrapped_server
-        if request.name == "restart_wrapped_server" {
-            self.restart_wrapped_server().await
-        } else {
-            self.call_tool_dynamic(&request.name, arguments).await
-        }
+        // Delegate all tool calls to the unified handler
+        self.handle_tool_call(&request.name, arguments).await
     }
 }

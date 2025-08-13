@@ -82,34 +82,37 @@ impl WrapServer {
         )]))
     }
 
-    // Dynamic tool handler - not directly exposed through tool_router
-    pub async fn call_tool_dynamic(
+    /// Handle tool calls - both built-in and proxied tools
+    pub async fn handle_tool_call(
         &self,
         name: &str,
         arguments: Value,
     ) -> Result<CallToolResult, McpError> {
         // Handle built-in tools
-        if name == "show_log" {
-            let req: ShowLogRequest = serde_json::from_value(arguments).map_err(|e| McpError {
-                code: ErrorCode::INVALID_PARAMS,
-                message: format!("Invalid parameters: {e}").into(),
-                data: None,
-            })?;
-            return show_log(req, &self.tool_manager.log_storage).await;
+        match name {
+            "restart_wrapped_server" => self.restart_wrapped_server().await,
+            "show_log" => {
+                let req: ShowLogRequest = serde_json::from_value(arguments).map_err(|e| McpError {
+                    code: ErrorCode::INVALID_PARAMS,
+                    message: format!("Invalid parameters: {e}").into(),
+                    data: None,
+                })?;
+                show_log(req, &self.tool_manager.log_storage).await
+            }
+            "clear_log" => {
+                let req: ClearLogRequest = serde_json::from_value(arguments).map_err(|e| McpError {
+                    code: ErrorCode::INVALID_PARAMS,
+                    message: format!("Invalid parameters: {e}").into(),
+                    data: None,
+                })?;
+                clear_log(req, &self.tool_manager.log_storage).await
+            }
+            _ => {
+                // Proxy to wrappee
+                self.wrappee_state
+                    .proxy_tool_call(name, arguments, &self.tool_manager)
+                    .await
+            }
         }
-
-        if name == "clear_log" {
-            let req: ClearLogRequest = serde_json::from_value(arguments).map_err(|e| McpError {
-                code: ErrorCode::INVALID_PARAMS,
-                message: format!("Invalid parameters: {e}").into(),
-                data: None,
-            })?;
-            return clear_log(req, &self.tool_manager.log_storage).await;
-        }
-
-        // Proxy to wrappee
-        self.wrappee_state
-            .proxy_tool_call(name, arguments, &self.tool_manager)
-            .await
     }
 }
