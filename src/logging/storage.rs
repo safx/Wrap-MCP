@@ -15,7 +15,7 @@ pub struct LogStorage {
 }
 
 impl LogStorage {
-    pub fn new(config: LogConfig) -> Self {
+    pub fn new(config: &LogConfig) -> Self {
         Self::new_with_max_entries(config.log_size)
     }
 

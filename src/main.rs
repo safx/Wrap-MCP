@@ -18,7 +18,7 @@ async fn main() -> Result<()> {
     let transport = &config.transport.transport;
 
     // Create a shared server instance for signal handling
-    let server = WrapServer::new(config.log.clone(), config.wrappee.clone());
+    let server = WrapServer::new(&config.log, &config.wrappee);
 
     // Setup signal handlers
     server.setup_signal_handlers();

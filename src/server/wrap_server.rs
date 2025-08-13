@@ -22,15 +22,8 @@ pub struct WrapServer {
     pub(crate) wrappee_config: Arc<WrappeeConfig>,
 }
 
-impl Default for WrapServer {
-    fn default() -> Self {
-        use crate::config::{LogConfig, WrappeeConfig};
-        Self::new(LogConfig::default(), WrappeeConfig::default())
-    }
-}
-
 impl WrapServer {
-    pub fn new(log_config: LogConfig, wrappee_config: WrappeeConfig) -> Self {
+    pub fn new(log_config: &LogConfig, wrappee_config: &WrappeeConfig) -> Self {
         let log_storage = Arc::new(LogStorage::new(log_config));
         let tool_manager = Arc::new(ToolManager::new(log_storage));
 
@@ -42,7 +35,7 @@ impl WrapServer {
             disable_colors: Arc::new(RwLock::new(false)),
             peer: Arc::new(RwLock::new(None)),
             shutting_down: Arc::new(AtomicBool::new(false)),
-            wrappee_config: Arc::new(wrappee_config),
+            wrappee_config: Arc::new(wrappee_config.clone()),
         }
     }
 
