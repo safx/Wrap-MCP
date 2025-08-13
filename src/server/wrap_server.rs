@@ -92,11 +92,8 @@ impl WrapServer {
         self.shutting_down.store(true, Ordering::SeqCst);
 
         // Shutdown wrappee
-        if let Some(client) = self.wrappee_state.take_client().await {
-            tracing::info!("Shutting down wrappee process");
-            if let Err(e) = client.shutdown().await {
-                tracing::warn!("Error shutting down wrappee: {}", e);
-            }
+        if let Err(e) = self.wrappee_state.shutdown().await {
+            tracing::warn!("Error shutting down wrappee: {}", e);
         }
     }
 
@@ -107,27 +104,10 @@ impl WrapServer {
         args: &[String],
         disable_colors: bool,
     ) -> Result<WrappeeClient> {
-        tracing::info!("Starting wrappee process: {command} {args:?}");
-
-        // Spawn the wrappee process
-        let mut wrappee_client = WrappeeClient::spawn(
-            command,
-            args,
-            disable_colors,
-            self.wrappee_state.config.as_ref().clone(),
-        )?;
-
-        // Initialize the wrappee
-        wrappee_client
-            .initialize(&self.wrappee_state.config.protocol_version)
-            .await?;
-
-        // Discover tools from wrappee
-        self.tool_manager
-            .discover_tools(&mut wrappee_client)
-            .await?;
-
-        Ok(wrappee_client)
+        // Delegate to WrappeeState
+        self.wrappee_state
+            .start_wrappee(command, args, disable_colors, &self.tool_manager)
+            .await
     }
 
     /// Start stderr monitoring for the wrappee
@@ -150,12 +130,7 @@ impl WrapServer {
 
     /// Get PID of current wrappee process
     pub(crate) async fn get_wrappee_pid(&self) -> Option<u32> {
-        let wrappee_guard = self.wrappee_state.client.read().await;
-        if let Some(wrappee) = wrappee_guard.as_ref() {
-            wrappee.get_pid().await
-        } else {
-            None
-        }
+        self.wrappee_state.get_pid().await
     }
 
     /// Send tool list changed notification if peer is available
@@ -170,12 +145,4 @@ impl WrapServer {
         }
     }
 
-    /// Convert anyhow::Error to McpError for tool call responses
-    pub(crate) fn error_to_mcp(e: impl std::fmt::Display, message: &str) -> McpError {
-        McpError {
-            code: ErrorCode::INTERNAL_ERROR,
-            message: format!("{message}: {e}").into(),
-            data: None,
-        }
-    }
 }

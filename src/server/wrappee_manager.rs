@@ -1,7 +1,10 @@
 use super::wrap_server::WrapServer;
-use crate::tools::{
-    clear_log::{ClearLogRequest, clear_log},
-    show_log::{ShowLogRequest, show_log},
+use crate::{
+    cli::CliOptions,
+    tools::{
+        clear_log::{ClearLogRequest, clear_log},
+        show_log::{ShowLogRequest, show_log},
+    },
 };
 use anyhow::Result;
 use rmcp::{ErrorData as McpError, model::*};
@@ -10,88 +13,45 @@ use serde_json::Value;
 impl WrapServer {
     pub async fn initialize_wrappee(&self) -> Result<()> {
         // Parse command line arguments
-        let args: Vec<String> = std::env::args().collect();
+        let opts = CliOptions::from_args();
 
-        // Find the "--" separator
-        let separator_pos = args.iter().position(|arg| arg == "--");
-
-        // Check for options before "--"
-        let (preserve_ansi, watch_binary) = separator_pos
-            .map(|pos| {
-                let opts = &args[1..pos];
-                (
-                    opts.contains(&"--ansi".to_string()),
-                    opts.contains(&"-w".to_string()),
-                )
-            })
-            .unwrap_or((false, false));
-
-        if preserve_ansi {
+        // Configure ANSI removal
+        if opts.preserve_ansi {
             tracing::info!("ANSI escape sequences will be preserved (--ansi option)");
-            // Store the flag in log storage (false = don't remove ANSI)
             self.tool_manager.log_storage.set_ansi_removal(false).await;
         } else {
             tracing::info!("ANSI escape sequence removal enabled (default)");
-            // Store the flag in log storage (true = remove ANSI)
             self.tool_manager.log_storage.set_ansi_removal(true).await;
         }
 
-        if watch_binary {
-            tracing::info!("Binary file watching enabled (-w option)");
-        }
-
-        let (command, wrappee_args) = match separator_pos {
-            Some(pos) if pos + 1 < args.len() => {
-                // Get the command and arguments after "--"
-                let command = args[pos + 1].clone();
-                let wrappee_args = args
-                    .get(pos + 2..)
-                    .map(|slice| slice.to_vec())
-                    .unwrap_or_default();
-                (command, wrappee_args)
-            }
-            _ => {
-                // No "--" found or no command after it, use default
-                tracing::warn!(
-                    "No wrappee command specified. Usage: wrap-mcp [options] -- <command> [args...]"
-                );
-                (
-                    "echo".to_string(),
-                    vec!["No wrappee command specified".to_string()],
-                )
-            }
-        };
-
-        tracing::info!("Initializing wrappee with command: {command} {wrappee_args:?}");
-
-        // Store command and args for potential restart
-        self.wrappee_state.set_command(command.clone(), wrappee_args.clone(), !preserve_ansi).await;
-
-        // Start the wrappee using the common method
-        let wrappee_result = self
-            .start_wrappee_internal(&command, &wrappee_args, !preserve_ansi)
+        // Initialize the wrappee
+        let init_result = self.wrappee_state
+            .initialize(
+                &opts.command,
+                &opts.args,
+                opts.disable_colors(),
+                &self.tool_manager,
+            )
             .await;
 
-        match wrappee_result {
-            Ok(wrappee_client) => {
-                // Store the wrappee client
-                self.wrappee_state.set_client(Some(wrappee_client)).await;
-
+        match init_result {
+            Ok(_) => {
                 // Start stderr monitoring in the background
                 self.start_stderr_monitoring();
             }
             Err(e) => {
                 // If not in watch mode, panic on failure to start wrappee
-                if !watch_binary {
-                    panic!("Failed to spawn wrappee process '{command}': {e}");
+                if !opts.watch_binary {
+                    panic!("Failed to spawn wrappee process '{}': {e}", opts.command);
                 }
                 // In watch mode, log the error but continue to set up file watching
                 tracing::warn!("Failed to start wrappee (will wait for file creation): {e}");
             }
         }
 
-        // Start file watching if enabled (even if wrappee failed to start)
-        if watch_binary {
+        // Start file watching if enabled
+        if opts.watch_binary {
+            tracing::info!("Binary file watching enabled (-w option)");
             self.start_file_watching().await?;
         }
 
@@ -101,52 +61,22 @@ impl WrapServer {
     pub async fn restart_wrapped_server(&self) -> Result<CallToolResult, McpError> {
         tracing::info!("Restarting wrapped server");
 
-        // Check if command and args are available
-        if !self.wrappee_state.has_config().await {
-            return Err(McpError {
+        // Restart the wrappee
+        self.wrappee_state
+            .restart(&self.tool_manager)
+            .await
+            .map_err(|e| McpError {
                 code: ErrorCode::INTERNAL_ERROR,
-                message: "No wrapped server to restart".into(),
-                data: None,
-            });
-        }
-
-        // Shutdown existing wrappee
-        if let Some(client) = self.wrappee_state.take_client().await {
-            tracing::info!("Shutting down existing wrapped server");
-            if let Err(e) = client.shutdown().await {
-                tracing::warn!("Error during shutdown: {e}");
-            }
-        }
-
-        // Wait a bit for clean shutdown
-        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
-
-        // Clear tools before restarting
-        self.tool_manager.clear_tools().await;
-
-        // Start new wrappee using stored command and args
-        let (command, args, disable_colors) = self.wrappee_state.get_command().await
-            .ok_or_else(|| McpError {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Configuration lost unexpectedly".into(),
+                message: format!("Failed to restart wrapped server: {e}").into(),
                 data: None,
             })?;
 
-        let wrappee_client = self
-            .start_wrappee_internal(&command, &args, disable_colors)
-            .await
-        .map_err(|e| Self::error_to_mcp(e, "Failed to restart wrapped server"))?;
-
-        // Store the new wrappee client
-        self.wrappee_state.set_client(Some(wrappee_client)).await;
-
-        // Send tool list changed notification if peer is available
+        // Send tool list changed notification
         self.notify_tools_changed().await;
 
         // Restart stderr monitoring
         self.start_stderr_monitoring();
 
-        tracing::info!("Wrapped server restarted successfully");
         Ok(CallToolResult::success(vec![Content::text(
             "✅ Wrapped server restarted successfully",
         )]))
@@ -178,17 +108,8 @@ impl WrapServer {
         }
 
         // Proxy to wrappee
-        let mut wrappee_guard = self.wrappee_state.get_client_mut().await;
-        if let Some(wrappee) = wrappee_guard.as_mut() {
-            self.tool_manager
-                .proxy_tool_call(name, arguments, wrappee)
-                .await
-        } else {
-            Err(McpError {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: "Wrappee not initialized".into(),
-                data: None,
-            })
-        }
+        self.wrappee_state
+            .proxy_tool_call(name, arguments, &self.tool_manager)
+            .await
     }
 }
