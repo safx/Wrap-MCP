@@ -1,4 +1,5 @@
 use crate::logging::{LogEntry, LogEntryContent, LogEntryType, LogFilter, LogStorage};
+use crate::types::RequestId;
 use anyhow::Result;
 use rmcp::{ErrorData as McpError, model::*};
 use schemars::JsonSchema;
@@ -46,13 +47,13 @@ fn format_request_args(args: &Value) -> String {
 }
 
 // Format a request log entry
-fn format_request_entry(id: usize, tool_name: &str, args: &Value) -> String {
+fn format_request_entry(id: RequestId, tool_name: &str, args: &Value) -> String {
     let args_str = format_request_args(args);
     format!("[REQUEST #{id}] {tool_name}({args_str})\n")
 }
 
 // Format a response log entry
-fn format_response_entry(request_id: usize, response: &Value) -> String {
+fn format_response_entry(request_id: RequestId, response: &Value) -> String {
     let mut output = String::new();
 
     if let Some(result) = response.get("result")
@@ -70,7 +71,7 @@ fn format_response_entry(request_id: usize, response: &Value) -> String {
 }
 
 // Format an error log entry
-fn format_error_entry(request_id: usize, error: &str) -> String {
+fn format_error_entry(request_id: RequestId, error: &str) -> String {
     format!("[ERROR #{request_id}] {error}\n")
 }
 
@@ -91,13 +92,13 @@ fn clean_stderr_message(message: &str) -> &str {
         || message.contains(" DEBUG ")
     {
         // Try to extract after the module path
-        if let Some(module_start) = message.rfind(" ThreadId") {
-            if let Some(msg_start) = message[module_start..].find(": ") {
-                if let Some(second_colon) = message[module_start + msg_start + 2..].find(": ") {
-                    return &message[module_start + msg_start + 2 + second_colon + 2..];
-                } else {
-                    return &message[module_start + msg_start + 2..];
-                }
+        if let Some(module_start) = message.rfind(" ThreadId")
+            && let Some(msg_start) = message[module_start..].find(": ")
+        {
+            if let Some(second_colon) = message[module_start + msg_start + 2..].find(": ") {
+                return &message[module_start + msg_start + 2 + second_colon + 2..];
+            } else {
+                return &message[module_start + msg_start + 2..];
             }
         }
     }
@@ -120,7 +121,7 @@ fn format_ai_output(logs: Vec<LogEntry>) -> Content {
         for log in &logs {
             let formatted_entry = match &log.content {
                 LogEntryContent::Request { tool_name, content } => {
-                    format_request_entry(log.id, tool_name, content)
+                    format_request_entry(log.id, tool_name.as_str(), content)
                 }
                 LogEntryContent::Response {
                     request_id,

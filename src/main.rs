@@ -29,11 +29,7 @@ async fn main() -> Result<()> {
         // Initialize wrappee in the background
         let server_init = server.clone();
         tokio::spawn(async move {
-            if let Err(e) = server_init.initialize_wrappee().await {
-                tracing::error!("Critical error initializing wrappee: {e}");
-                // Exit with error code to indicate failure
-                std::process::exit(1);
-            }
+            _ = server_init.initialize_wrappee().await;
         });
 
         Ok(server.clone())

@@ -5,22 +5,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::logging::LogFilter;
+use crate::types::{RequestId, ToolName};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum LogEntryContent {
     Request {
-        tool_name: String,
+        tool_name: ToolName,
         content: Value,
     },
     Response {
-        tool_name: String,
-        request_id: usize,
+        tool_name: ToolName,
+        request_id: RequestId,
         response: Value,
     },
     Error {
-        tool_name: String,
-        request_id: usize,
+        tool_name: ToolName,
+        request_id: RequestId,
         error: String,
     },
     Stderr {
@@ -31,18 +32,18 @@ pub enum LogEntryContent {
 impl LogEntryContent {
     pub fn tool_name(&self) -> Option<&str> {
         match self {
-            LogEntryContent::Request { tool_name, .. } => Some(tool_name),
-            LogEntryContent::Response { tool_name, .. } => Some(tool_name),
-            LogEntryContent::Error { tool_name, .. } => Some(tool_name),
+            LogEntryContent::Request { tool_name, .. } => Some(tool_name.as_str()),
+            LogEntryContent::Response { tool_name, .. } => Some(tool_name.as_str()),
+            LogEntryContent::Error { tool_name, .. } => Some(tool_name.as_str()),
             LogEntryContent::Stderr { .. } => None,
         }
     }
 
     pub fn match_tool_name(&self, name: &str) -> bool {
         match self {
-            LogEntryContent::Request { tool_name, .. } => tool_name == name,
-            LogEntryContent::Response { tool_name, .. } => tool_name == name,
-            LogEntryContent::Error { tool_name, .. } => tool_name == name,
+            LogEntryContent::Request { tool_name, .. } => tool_name.as_str() == name,
+            LogEntryContent::Response { tool_name, .. } => tool_name.as_str() == name,
+            LogEntryContent::Error { tool_name, .. } => tool_name.as_str() == name,
             LogEntryContent::Stderr { .. } => false,
         }
     }
@@ -59,21 +60,26 @@ impl LogEntryContent {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogEntry {
-    pub id: usize,
+    pub id: RequestId,
     pub timestamp: DateTime<Utc>,
     #[serde(flatten)]
     pub content: LogEntryContent,
 }
 
 impl LogEntry {
-    pub fn new_request(id: usize, tool_name: String, content: Value) -> Self {
+    pub fn new_request(id: RequestId, tool_name: ToolName, content: Value) -> Self {
         Self {
             id,
             timestamp: Utc::now(),
             content: LogEntryContent::Request { tool_name, content },
         }
     }
-    pub fn new_response(id: usize, tool_name: String, request_id: usize, response: Value) -> Self {
+    pub fn new_response(
+        id: RequestId,
+        tool_name: ToolName,
+        request_id: RequestId,
+        response: Value,
+    ) -> Self {
         Self {
             id,
             timestamp: Utc::now(),
@@ -84,7 +90,12 @@ impl LogEntry {
             },
         }
     }
-    pub fn new_error(id: usize, tool_name: String, request_id: usize, error: String) -> Self {
+    pub fn new_error(
+        id: RequestId,
+        tool_name: ToolName,
+        request_id: RequestId,
+        error: String,
+    ) -> Self {
         Self {
             id,
             timestamp: Utc::now(),
@@ -95,7 +106,7 @@ impl LogEntry {
             },
         }
     }
-    pub fn new_stderr(id: usize, message: String) -> Self {
+    pub fn new_stderr(id: RequestId, message: String) -> Self {
         Self {
             id,
             timestamp: Utc::now(),
@@ -187,7 +198,7 @@ mod tests {
         content: LogEntryContent,
     ) -> LogEntry {
         LogEntry {
-            id,
+            id: crate::types::RequestId::new(id),
             timestamp,
             content,
         }
@@ -199,7 +210,7 @@ mod tests {
             1,
             Utc::now(),
             LogEntryContent::Request {
-                tool_name: "test_tool".to_string(),
+                tool_name: crate::types::ToolName::from("test_tool"),
                 content: serde_json::json!({}),
             },
         );
@@ -248,7 +259,7 @@ mod tests {
             1,
             Utc::now(),
             LogEntryContent::Request {
-                tool_name: "tool".to_string(),
+                tool_name: crate::types::ToolName::from("tool"),
                 content: serde_json::json!({}),
             },
         );
@@ -281,7 +292,7 @@ mod tests {
             1,
             base_time,
             LogEntryContent::Request {
-                tool_name: "tool".to_string(),
+                tool_name: crate::types::ToolName::from("tool"),
                 content: serde_json::json!({}),
             },
         );
@@ -333,8 +344,8 @@ mod tests {
             1,
             Utc.with_ymd_and_hms(2024, 1, 15, 12, 0, 0).unwrap(),
             LogEntryContent::Response {
-                tool_name: "my_tool".to_string(),
-                request_id: 1,
+                tool_name: crate::types::ToolName::from("my_tool"),
+                request_id: crate::types::RequestId::new(1),
                 response: serde_json::json!({"result": "ok"}),
             },
         );
@@ -366,8 +377,8 @@ mod tests {
             1,
             Utc::now(),
             LogEntryContent::Error {
-                tool_name: "tool".to_string(),
-                request_id: 1,
+                tool_name: crate::types::ToolName::from("tool"),
+                request_id: crate::types::RequestId::new(1),
                 error: "test error".to_string(),
             },
         );
@@ -389,7 +400,7 @@ mod tests {
             1,
             Utc::now(),
             LogEntryContent::Request {
-                tool_name: "search_tool".to_string(),
+                tool_name: crate::types::ToolName::from("search_tool"),
                 content: serde_json::json!({
                     "query": "find important document",
                     "options": {"case_sensitive": false}
@@ -434,8 +445,8 @@ mod tests {
             1,
             Utc::now(),
             LogEntryContent::Error {
-                tool_name: "database".to_string(),
-                request_id: 1,
+                tool_name: crate::types::ToolName::from("database"),
+                request_id: crate::types::RequestId::new(1),
                 error: "Connection timeout after 30 seconds".to_string(),
             },
         );

@@ -3,6 +3,7 @@ mod tests {
     use std::sync::Arc;
     use wrap_mcp::logging::LogStorage;
     use wrap_mcp::tools::ToolManager;
+    use wrap_mcp::types::RequestId;
 
     #[tokio::test]
     async fn test_log_storage() {
