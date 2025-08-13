@@ -9,7 +9,7 @@ use anyhow::Result;
 use rmcp::{RoleServer, service::Peer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::RwLock;
+use tokio::sync::{RwLock, mpsc};
 
 #[derive(Clone)]
 pub struct WrapServer {
@@ -17,6 +17,7 @@ pub struct WrapServer {
     pub(crate) wrappee_controller: Arc<WrappeeController>,
     pub(crate) peer: Arc<RwLock<Option<Peer<RoleServer>>>>,
     pub(crate) shutting_down: Arc<AtomicBool>,
+    pub(crate) shutdown_tx: Arc<RwLock<Option<mpsc::Sender<()>>>>,
 }
 
 impl WrapServer {
@@ -31,6 +32,7 @@ impl WrapServer {
             wrappee_controller,
             peer: Arc::new(RwLock::new(None)),
             shutting_down: Arc::new(AtomicBool::new(false)),
+            shutdown_tx: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -106,6 +108,11 @@ impl WrapServer {
         tracing::info!("Initiating graceful shutdown");
         self.shutting_down.store(true, Ordering::SeqCst);
 
+        // Send shutdown signal to stderr monitoring
+        if let Some(tx) = self.shutdown_tx.write().await.take() {
+            let _ = tx.send(()).await;
+        }
+
         // Shutdown wrappee
         if let Err(e) = self.wrappee_controller.shutdown().await {
             tracing::warn!("Error shutting down wrappee: {}", e);
@@ -129,17 +136,53 @@ impl WrapServer {
     pub(crate) fn start_stderr_monitoring(&self) {
         let wrappee_controller = self.wrappee_controller.clone();
         let log_storage = self.tool_manager.log_storage.clone();
+        let shutdown_tx = self.shutdown_tx.clone();
+
+        // Create shutdown channel for this monitoring task
+        let (tx, mut rx) = mpsc::channel::<()>(1);
+
         tokio::spawn(async move {
+            // Store the shutdown sender
+            *shutdown_tx.write().await = Some(tx);
+
             loop {
-                let mut wrappee_guard = wrappee_controller.get_client_mut().await;
-                if let Some(wrappee) = wrappee_guard.as_mut()
-                    && let Ok(Some(stderr_msg)) = wrappee.receive_stderr().await
-                {
-                    log_storage.add_stderr(stderr_msg).await;
+                // Check for stderr messages without holding the lock during async operations
+                let stderr_result = {
+                    let mut wrappee_guard = wrappee_controller.get_client_mut().await;
+                    if let Some(wrappee) = wrappee_guard.as_mut() {
+                        // Try non-blocking receive first
+                        wrappee.receive_stderr().await
+                    } else {
+                        Ok(None)
+                    }
+                    // Lock is released here
+                };
+
+                // Process the result without holding the lock
+                match stderr_result {
+                    Ok(Some(stderr_msg)) => {
+                        log_storage.add_stderr(stderr_msg).await;
+                    }
+                    Ok(None) => {
+                        // No message available, wait a bit or for shutdown
+                        tokio::select! {
+                            _ = tokio::time::sleep(tokio::time::Duration::from_millis(100)) => {
+                                // Continue checking
+                            }
+                            _ = rx.recv() => {
+                                tracing::info!("Stderr monitoring received shutdown signal");
+                                break;
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("Error receiving stderr: {}", e);
+                        break;
+                    }
                 }
-                drop(wrappee_guard);
-                tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
             }
+
+            tracing::info!("Stderr monitoring task ended");
         });
     }
 

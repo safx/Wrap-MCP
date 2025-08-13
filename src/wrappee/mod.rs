@@ -128,11 +128,40 @@ impl WrappeeClient {
     }
 
     pub async fn receive_stderr(&mut self) -> Result<Option<String>> {
-        if let Ok(line) = self.stderr_rx.try_recv() {
-            tracing::debug!("Received stderr from wrappee: {line}");
-            return Ok(Some(line));
+        // Try to receive stderr without blocking
+        match self.stderr_rx.try_recv() {
+            Ok(line) => {
+                tracing::debug!("Received stderr from wrappee: {line}");
+                Ok(Some(line))
+            }
+            Err(mpsc::error::TryRecvError::Empty) => Ok(None),
+            Err(mpsc::error::TryRecvError::Disconnected) => {
+                tracing::debug!("Stderr channel disconnected");
+                Ok(None)
+            }
         }
-        Ok(None)
+    }
+
+    /// Receive stderr with async wait - used for monitoring
+    pub async fn receive_stderr_async(&mut self) -> Result<Option<String>> {
+        // Use async recv for monitoring where we want to wait
+        match self.stderr_rx.recv().await {
+            Some(line) => {
+                tracing::debug!("Received stderr from wrappee: {line}");
+                Ok(Some(line))
+            }
+            None => {
+                tracing::debug!("Stderr channel closed");
+                Ok(None)
+            }
+        }
+    }
+
+    /// Get a clone of the stderr receiver for external monitoring
+    pub fn take_stderr_receiver(&mut self) -> Option<mpsc::Receiver<String>> {
+        // This will only work once - the receiver can't be cloned
+        // So we need to restructure this differently
+        None // Placeholder for now
     }
 
     pub async fn wait_for_response(&mut self) -> Result<Value> {
