@@ -6,7 +6,7 @@ use crate::{
     wrappee::WrappeeClient,
 };
 use anyhow::Result;
-use rmcp::{ErrorData as McpError, RoleServer, model::*, service::Peer};
+use rmcp::{RoleServer, service::Peer};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::sync::RwLock;
@@ -144,5 +144,4 @@ impl WrapServer {
             tracing::info!("No peer available for tool list changed notification");
         }
     }
-
 }

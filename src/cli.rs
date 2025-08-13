@@ -55,7 +55,9 @@ impl CliOptions {
             }
         };
 
-        tracing::info!("Parsed CLI options: command={command}, args={wrappee_args:?}, preserve_ansi={preserve_ansi}, watch={watch_binary}");
+        tracing::info!(
+            "Parsed CLI options: command={command}, args={wrappee_args:?}, preserve_ansi={preserve_ansi}, watch={watch_binary}"
+        );
 
         Self {
             preserve_ansi,

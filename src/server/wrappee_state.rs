@@ -72,13 +72,6 @@ impl WrappeeState {
         self.client.read().await.is_some()
     }
 
-    /// Check if command configuration exists
-    pub async fn has_config(&self) -> bool {
-        let cmd = self.command.read().await;
-        let args = self.args.read().await;
-        cmd.is_some() && args.is_some()
-    }
-
     /// Get PID of current wrappee process
     pub async fn get_pid(&self) -> Option<u32> {
         let client_guard = self.client.read().await;
@@ -132,21 +125,26 @@ impl WrappeeState {
         tool_manager: &ToolManager,
     ) -> Result<()> {
         // Store configuration for potential restart
-        self.set_command(command.to_string(), args.to_vec(), disable_colors).await;
+        self.set_command(command.to_string(), args.to_vec(), disable_colors)
+            .await;
 
         // Start the wrappee
-        let client = self.start_wrappee(command, args, disable_colors, tool_manager).await?;
-        
+        let client = self
+            .start_wrappee(command, args, disable_colors, tool_manager)
+            .await?;
+
         // Store the client
         self.set_client(Some(client)).await;
-        
+
         Ok(())
     }
 
     /// Restart the wrappee with stored configuration
     pub async fn restart(&self, tool_manager: &ToolManager) -> Result<()> {
         // Check if configuration exists
-        let (command, args, disable_colors) = self.get_command().await
+        let (command, args, disable_colors) = self
+            .get_command()
+            .await
             .ok_or_else(|| anyhow::anyhow!("No wrappee configuration available for restart"))?;
 
         // Shutdown existing wrappee
@@ -161,8 +159,10 @@ impl WrappeeState {
         tool_manager.clear_tools().await;
 
         // Start new wrappee
-        let client = self.start_wrappee(&command, &args, disable_colors, tool_manager).await?;
-        
+        let client = self
+            .start_wrappee(&command, &args, disable_colors, tool_manager)
+            .await?;
+
         // Store the new client
         self.set_client(Some(client)).await;
 

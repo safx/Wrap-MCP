@@ -25,7 +25,8 @@ impl WrapServer {
         }
 
         // Initialize the wrappee
-        let init_result = self.wrappee_state
+        let init_result = self
+            .wrappee_state
             .initialize(
                 &opts.command,
                 &opts.args,
@@ -92,19 +93,21 @@ impl WrapServer {
         match name {
             "restart_wrapped_server" => self.restart_wrapped_server().await,
             "show_log" => {
-                let req: ShowLogRequest = serde_json::from_value(arguments).map_err(|e| McpError {
-                    code: ErrorCode::INVALID_PARAMS,
-                    message: format!("Invalid parameters: {e}").into(),
-                    data: None,
-                })?;
+                let req: ShowLogRequest =
+                    serde_json::from_value(arguments).map_err(|e| McpError {
+                        code: ErrorCode::INVALID_PARAMS,
+                        message: format!("Invalid parameters: {e}").into(),
+                        data: None,
+                    })?;
                 show_log(req, &self.tool_manager.log_storage).await
             }
             "clear_log" => {
-                let req: ClearLogRequest = serde_json::from_value(arguments).map_err(|e| McpError {
-                    code: ErrorCode::INVALID_PARAMS,
-                    message: format!("Invalid parameters: {e}").into(),
-                    data: None,
-                })?;
+                let req: ClearLogRequest =
+                    serde_json::from_value(arguments).map_err(|e| McpError {
+                        code: ErrorCode::INVALID_PARAMS,
+                        message: format!("Invalid parameters: {e}").into(),
+                        data: None,
+                    })?;
                 clear_log(req, &self.tool_manager.log_storage).await
             }
             _ => {
